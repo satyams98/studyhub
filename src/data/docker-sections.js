@@ -1,0 +1,16 @@
+export const sectionMeta = [
+  { id: 1,  title: 'Containers & Docker Fundamentals',                    optional: false, color: '#2496ED' },
+  { id: 2,  title: 'Installing Docker & Essential CLI Commands',          optional: false, color: '#3FB68B' },
+  { id: 3,  title: 'Inspecting & Debugging Containers',                   optional: false, color: '#E0A63A' },
+  { id: 4,  title: 'Docker Images & Writing Dockerfiles',                 optional: false, color: '#2496ED' },
+  { id: 5,  title: 'Docker Workflow, Development & Private Registries',   optional: false, color: '#B57BEE' },
+  { id: 6,  title: 'Docker Compose — Multi-Container Apps',               optional: false, color: '#3FB68B' },
+  { id: 7,  title: 'Docker Volumes & Persistent Data',                    optional: false, color: '#E1596B' },
+  { id: 8,  title: 'Kubernetes Fundamentals: Components & Architecture',  optional: false, color: '#326CE5' },
+  { id: 9,  title: 'Local Clusters & kubectl Essentials',                 optional: false, color: '#3FB68B' },
+  { id: 10, title: 'Kubernetes YAML, Deployments & Services in Action',   optional: false, color: '#326CE5' },
+  { id: 11, title: 'Kubernetes Networking, Services Deep-Dive & Ingress', optional: false, color: '#B57BEE' },
+  { id: 12, title: 'Namespaces & Cluster Organization',                  optional: false, color: '#E0A63A' },
+  { id: 13, title: 'Configuration, Secrets & Storage in Kubernetes',     optional: false, color: '#326CE5' },
+  { id: 14, title: 'Production Kubernetes: Registries, Helm, Operators & Monitoring', optional: false, color: '#E1596B' },
+]

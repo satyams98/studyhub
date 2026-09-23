@@ -15,6 +15,10 @@ dist-ssr
 # Environment
 .env
 
+# Local Claude Code session state (machine-specific, not shared)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

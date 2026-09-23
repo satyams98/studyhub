@@ -34,6 +34,23 @@ import springBatch02 from './spring-batch-lessons/section02'
 import springBatch03 from './spring-batch-lessons/section03.json'
 import springBatch04 from './spring-batch-lessons/section04'
 import springBatch11 from './spring-batch-lessons/section11'
+
+import { sectionMeta as dockerSections } from './docker-sections'
+import { glossary as dockerGlossary } from './docker-glossary'
+import docker01 from './docker-lessons/section01'
+import docker02 from './docker-lessons/section02'
+import docker03 from './docker-lessons/section03'
+import docker04 from './docker-lessons/section04'
+import docker05 from './docker-lessons/section05'
+import docker06 from './docker-lessons/section06'
+import docker07 from './docker-lessons/section07'
+import docker08 from './docker-lessons/section08'
+import docker09 from './docker-lessons/section09'
+import docker10 from './docker-lessons/section10'
+import docker11 from './docker-lessons/section11'
+import docker12 from './docker-lessons/section12'
+import docker13 from './docker-lessons/section13'
+import docker14 from './docker-lessons/section14'
 import webflux01 from './webflux-lessons/section01'
 import webflux02 from './webflux-lessons/section02'
 import webflux03 from './webflux-lessons/section03'
@@ -57,6 +74,11 @@ const springBatchLessonsBySection = {
   3: springBatch03,
   4: springBatch04,
   11: springBatch11,
+}
+
+const dockerLessonsBySection = {
+  1: docker01, 2: docker02, 3: docker03, 4: docker04, 5: docker05, 6: docker06, 7: docker07,
+  8: docker08, 9: docker09, 10: docker10, 11: docker11, 12: docker12, 13: docker13, 14: docker14,
 }
 
 
@@ -105,17 +127,21 @@ const courseDefs = [
     lessonsBySection: webfluxLessonsBySection,
     glossary: webfluxGlossary,
   },
-  // {
-  //   slug: 'docker-kubernetes',
-  //   title: 'Docker & Kubernetes',
-  //   subtitle: 'Container Orchestration',
-  //   description: 'Learn containerization and orchestration from scratch.',
-  //   color: '#5B8DEF',
-  //   tags: ['DevOps', 'Docker', 'K8s'],
-  //   sectionMeta: dockerSections,
-  //   lessonsBySection: dockerLessons,
-  //   glossary: dockerGlossary,
-  // },
+  {
+    slug: 'docker-kubernetes',
+    title: 'Docker & Kubernetes',
+    subtitle: 'Container Orchestration',
+    description:
+      'Go from "what is a container?" to running production workloads on Kubernetes. ' +
+      'Covers Docker images, Dockerfiles, Compose, and volumes, then the full Kubernetes ' +
+      'core — Pods, Deployments, Services, Ingress, Namespaces, ConfigMaps/Secrets, ' +
+      'persistent storage, Helm, Operators, and monitoring with Prometheus.',
+    color: '#2496ED',
+    tags: ['DevOps', 'Docker', 'Kubernetes'],
+    sectionMeta: dockerSections,
+    lessonsBySection: dockerLessonsBySection,
+    glossary: dockerGlossary,
+  },
 ]
 
 // ─── Build & Export ────────────────────────────────────────────────────────

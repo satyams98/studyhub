@@ -1,0 +1,73 @@
+export const glossary = [
+  // ─── Docker ────────────────────────────────────────────────────────────
+  { term: 'Container', def: 'An isolated, running process with its own filesystem, network, and process namespace, built from an image. Containers share the host machine\'s OS kernel, which is what makes them lighter and faster to start than virtual machines.' },
+  { term: 'Image', def: 'A read-only, layered template containing an application and everything it needs to run (code, runtime, libraries, system tools). Running an image creates a container.' },
+  { term: 'Dockerfile', def: 'A text file of instructions (FROM, COPY, RUN, CMD, etc.) that Docker reads to build an image, layer by layer.' },
+  { term: 'Layer', def: 'One cached, immutable filesystem diff produced by a single Dockerfile instruction. Docker reuses unchanged layers on rebuild, which is why instruction order in a Dockerfile affects build speed.' },
+  { term: 'Docker Engine / Daemon', def: 'The background service (dockerd) that builds images, runs containers, and manages networks/volumes on the host. The docker CLI talks to it over a REST API.' },
+  { term: 'Docker Hub', def: 'Docker\'s default public registry for storing and distributing images (e.g., official nginx, postgres images).' },
+  { term: 'Container Registry', def: 'A server that stores and serves Docker images by name and tag. Can be public (Docker Hub) or private (AWS ECR, self-hosted).' },
+  { term: 'docker run', def: 'Creates and starts a new container from an image in one step.' },
+  { term: 'docker exec', def: 'Runs an additional command (often a shell) inside an already-running container — used for debugging.' },
+  { term: 'docker logs', def: 'Prints the stdout/stderr output a container has produced, without needing to shell into it.' },
+  { term: 'Bind Mount', def: 'A volume type that maps a specific path on the host filesystem directly into a container — commonly used in local development so code edits are visible inside the container immediately.' },
+  { term: 'Named Volume', def: 'A volume type managed entirely by Docker (stored under Docker\'s own data directory) and referenced by name — the recommended way to persist data like a database\'s files.' },
+  { term: 'tmpfs Mount', def: 'A mount that lives only in host memory and disappears when the container stops — used for sensitive or highly transient data that should never touch disk.' },
+  { term: 'Docker Compose', def: 'A tool for defining and running multi-container applications from a single YAML file (docker-compose.yml), so related services can be started together with one command.' },
+  { term: 'ENTRYPOINT vs CMD', def: 'Both define what runs when a container starts. CMD supplies default arguments that are easy to override at `docker run` time; ENTRYPOINT fixes the executable itself, with CMD (if present) supplying its default arguments.' },
+  { term: 'Multi-Stage Build', def: 'A Dockerfile technique using multiple FROM stages so build-time tools and dependencies never end up in the final image, keeping it small and secure.' },
+  { term: 'Docker Swarm', def: 'Docker\'s own, simpler built-in container orchestrator — an alternative to Kubernetes for clustering multiple Docker hosts, with a much smaller feature set.' },
+
+  // ─── Kubernetes Core ───────────────────────────────────────────────────
+  { term: 'Kubernetes (K8s)', def: 'An open-source container orchestration platform, originally developed at Google, that automates deploying, scaling, healing, and networking containerized applications across a cluster of machines.' },
+  { term: 'Cluster', def: 'A set of machines (nodes) managed together by Kubernetes: one or more control-plane nodes plus one or more worker nodes.' },
+  { term: 'Node', def: 'A single machine (physical or virtual) in a Kubernetes cluster. A worker node runs application Pods; a control-plane node runs the cluster\'s management components.' },
+  { term: 'Pod', def: 'The smallest deployable unit in Kubernetes — one or more tightly-coupled containers that share the same network namespace (so they can reach each other over localhost) and storage volumes.' },
+  { term: 'Control Plane', def: 'The set of components (API server, etcd, scheduler, controller manager) that make global decisions about the cluster and maintain its desired state.' },
+  { term: 'kube-apiserver', def: 'The front door to the control plane — a REST API that validates and processes all requests (from kubectl, controllers, kubelets) and is the only component that talks directly to etcd.' },
+  { term: 'etcd', def: 'A distributed, consistent key-value store that holds the entire cluster\'s state — every object definition and its current status.' },
+  { term: 'Scheduler', def: 'The control-plane component that watches for newly created Pods with no assigned node and picks the best-fit node for them based on resources and constraints.' },
+  { term: 'Controller Manager', def: 'Runs the control loops (Deployment controller, ReplicaSet controller, Node controller, etc.) that continuously reconcile the cluster\'s actual state toward its desired state.' },
+  { term: 'kubelet', def: 'The agent that runs on every worker node, talks to the container runtime to start/stop containers as instructed by the control plane, and reports node/Pod health back to the API server.' },
+  { term: 'kube-proxy', def: 'The network component on every node that implements Service routing rules, forwarding traffic for a Service\'s virtual IP to one of its backing Pods.' },
+  { term: 'kubectl', def: 'The command-line tool used to interact with a Kubernetes cluster\'s API server — creating, inspecting, updating, and deleting resources.' },
+  { term: 'Minikube', def: 'A tool that runs a single-node Kubernetes cluster locally (in a VM or container) — the standard way to learn and test Kubernetes without a cloud account.' },
+  { term: 'Manifest', def: 'A YAML (or JSON) file that declaratively describes the desired state of one or more Kubernetes objects, applied with `kubectl apply -f`.' },
+
+  // ─── Workloads ─────────────────────────────────────────────────────────
+  { term: 'Deployment', def: 'A controller that manages a set of identical Pods (via a ReplicaSet), handling scaling, self-healing, and rolling updates for stateless applications.' },
+  { term: 'ReplicaSet', def: 'Ensures a specified number of identical Pod replicas are running at all times; normally managed for you by a Deployment rather than created directly.' },
+  { term: 'StatefulSet', def: 'A controller for stateful applications (like databases) that gives each Pod a stable, unique network identity and its own persistent volume that survives rescheduling — unlike a Deployment, where Pods are interchangeable.' },
+  { term: 'Rolling Update', def: 'A Deployment\'s default strategy for changing Pods (e.g., a new image version) gradually, replacing old Pods with new ones a few at a time so the application stays available throughout.' },
+  { term: 'Namespace', def: 'A virtual cluster within a physical cluster — a way to scope and isolate groups of resources (e.g., per team or environment) so names don\'t collide and access/quotas can be managed separately.' },
+
+  // ─── Networking ────────────────────────────────────────────────────────
+  { term: 'Service', def: 'A stable network endpoint (virtual IP + DNS name) that load-balances traffic across a dynamic, changing set of Pods selected by a label selector — solving the problem that Pod IPs are ephemeral.' },
+  { term: 'ClusterIP', def: 'The default Service type: exposes the Service only on an internal, cluster-reachable virtual IP — used for Pod-to-Pod communication within the cluster.' },
+  { term: 'NodePort', def: 'A Service type that opens a static port (30000-32767 by default) on every node, forwarding traffic from that port to the Service — a simple way to expose an app outside the cluster, mainly for testing.' },
+  { term: 'LoadBalancer', def: 'A Service type that provisions an external load balancer from the cloud provider (or on-prem equivalent) and points it at the Service — the standard way to expose an app to the internet in production.' },
+  { term: 'Headless Service', def: 'A Service created with `clusterIP: None` that skips load-balancing and instead returns the individual IPs of all matching Pods via DNS — used when clients need to address specific Pods directly, as with StatefulSets.' },
+  { term: 'Ingress', def: 'An API object that manages external HTTP/HTTPS access to Services inside the cluster, typically providing host- and path-based routing and TLS termination through a single external entry point (an Ingress Controller).' },
+  { term: 'Ingress Controller', def: 'The actual piece of software (e.g., NGINX Ingress Controller) that watches Ingress resources and configures a reverse proxy/load balancer to implement their routing rules.' },
+  { term: 'Selector / Label', def: 'Labels are key-value tags attached to objects (like Pods); a selector is a query over those labels used by Services, Deployments, and other controllers to decide which objects they apply to.' },
+
+  // ─── Configuration & Storage ───────────────────────────────────────────
+  { term: 'ConfigMap', def: 'A Kubernetes object for storing non-sensitive configuration data as key-value pairs, which can be injected into Pods as environment variables or mounted as files.' },
+  { term: 'Secret', def: 'Like a ConfigMap, but intended for sensitive data (passwords, tokens, keys); stored base64-encoded and can be further protected with encryption-at-rest and RBAC.' },
+  { term: 'imagePullSecrets', def: 'A field on a Pod spec that references a Secret holding private registry credentials, telling the kubelet how to authenticate when pulling that Pod\'s container images.' },
+  { term: 'Volume (Kubernetes)', def: 'A directory accessible to the containers in a Pod, with a lifecycle tied to the Pod (unlike a container\'s own filesystem, which is lost on restart). Backed by many possible sources: an emptyDir, a ConfigMap, a Secret, or a PersistentVolumeClaim.' },
+  { term: 'PersistentVolume (PV)', def: 'A piece of storage in the cluster provisioned by an administrator or dynamically via a StorageClass — exists independently of any single Pod\'s lifecycle.' },
+  { term: 'PersistentVolumeClaim (PVC)', def: 'A user\'s request for storage — Kubernetes binds it to a matching (or dynamically provisioned) PersistentVolume, and Pods mount the PVC rather than a PV directly.' },
+  { term: 'StorageClass', def: 'Defines a "class" of storage (e.g., SSD-backed, a specific cloud disk type) and enables dynamic provisioning: a PVC referencing a StorageClass automatically gets a matching PV created on demand.' },
+
+  // ─── Ecosystem & Operations ────────────────────────────────────────────
+  { term: 'Helm', def: 'The most widely used package manager for Kubernetes — bundles a set of manifests into a versioned, templated, reusable package called a chart.' },
+  { term: 'Helm Chart', def: 'A collection of templated YAML files plus a values file, packaged together so a complex application (with all its Deployments, Services, ConfigMaps, etc.) can be installed and upgraded as a single unit.' },
+  { term: 'Operator', def: 'A Kubernetes controller that encodes human operational knowledge for a specific application (e.g., a database) as code, extending the API with Custom Resources so complex tasks like backups or failover can be automated declaratively.' },
+  { term: 'Custom Resource Definition (CRD)', def: 'A way to extend the Kubernetes API with your own object types (e.g., a "PrometheusRule"), which Operators then watch and act on just like Kubernetes watches built-in objects.' },
+  { term: 'Prometheus', def: 'An open-source monitoring system that scrapes and stores time-series metrics from applications and cluster components, queried with PromQL — the de facto standard for Kubernetes monitoring.' },
+  { term: 'Prometheus Operator', def: 'A Kubernetes Operator that manages Prometheus (and related monitoring components like Alertmanager) declaratively via Custom Resources, commonly installed via a Helm chart.' },
+  { term: 'Self-Healing', def: 'Kubernetes\' ability to automatically restart failed containers, reschedule Pods from dead nodes, and replace Pods that fail health checks — without human intervention.' },
+  { term: 'High Availability (HA)', def: 'Running multiple replicas of both an application and the control plane itself (across nodes/zones) so the system keeps working through individual failures.' },
+  { term: 'Horizontal Scaling', def: 'Handling more load by running more Pod replicas (as opposed to vertical scaling, which gives a single Pod more CPU/memory) — Kubernetes\' preferred scaling model.' },
+]
