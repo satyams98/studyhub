@@ -21,7 +21,7 @@ export default function Quiz({ question, options, explanation }) {
   return (
     <div className="quiz-block">
       <div className="quiz-label">CONCEPT CHECK</div>
-      <p className="quiz-question">{question}</p>
+      <p className="quiz-question" dangerouslySetInnerHTML={{ __html: question }} />
       <div className="quiz-options">
         {options.map((opt, i) => {
           let cls = 'quiz-option'
@@ -31,7 +31,7 @@ export default function Quiz({ question, options, explanation }) {
           return (
             <button key={i} className={cls} onClick={() => handleSelect(i)}>
               <span className="quiz-option-letter">{String.fromCharCode(65 + i)}</span>
-              <span>{opt.label}</span>
+              <span dangerouslySetInnerHTML={{ __html: opt.label }} />
             </button>
           )
         })}
@@ -43,7 +43,8 @@ export default function Quiz({ question, options, explanation }) {
       )}
       {revealed && explanation && (
         <div className={`quiz-explanation ${selected === correctIdx ? 'correct' : 'incorrect'}`}>
-          <strong>{selected === correctIdx ? 'Correct!' : 'Not quite.'}</strong> {explanation}
+          <strong>{selected === correctIdx ? 'Correct!' : 'Not quite.'}</strong>{' '}
+          <span dangerouslySetInnerHTML={{ __html: explanation }} />
         </div>
       )}
     </div>

@@ -14,7 +14,10 @@ param(
     [int]$Workers = 0,
     [switch]$DryRun,
     [switch]$SkipBuild,
-    [switch]$SkipRegister
+    [switch]$SkipRegister,
+    [switch]$Ollama,
+    [switch]$Force,
+    [switch]$GlossaryOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,18 +72,27 @@ if (-not (Test-Path $TranscriptFolder)) {
     Write-Host "[ERROR] Transcript folder not found: $TranscriptFolder" -ForegroundColor Red
     exit 1
 }
-if (-not $env:API_KEY -and -not $env:GEMINI_API_KEY -and -not $env:NVIDIA_API_KEY -and -not $DryRun) {
+if (-not $env:API_KEY -and -not $env:GEMINI_API_KEY -and -not $env:NVIDIA_API_KEY -and -not $DryRun -and -not $Ollama) {
     Write-Host "[ERROR] No API key set in .env (API_KEY, GEMINI_API_KEY, or NVIDIA_API_KEY)" -ForegroundColor Red
     exit 1
 }
 
 $ModelName = if ($env:MODEL) { $env:MODEL } else { "gemini-2.5-flash" }
+$OllamaModel = if ($env:OLLAMA_MODEL) { $env:OLLAMA_MODEL } else { "minimax-m3:cloud" }
+$OllamaHost = if ($env:OLLAMA_HOST) { $env:OLLAMA_HOST } else { "http://localhost:11434" }
 
 Write-Host ""
 Write-Host "  Configuration:" -ForegroundColor White
 Write-Host "    Slug:        $CourseSlug" -ForegroundColor Gray
 Write-Host "    Title:       $CourseTitle" -ForegroundColor Gray
-Write-Host "    Model:       $ModelName" -ForegroundColor Gray
+if ($Ollama) {
+    Write-Host "    Backend:     Ollama (local)" -ForegroundColor Gray
+    Write-Host "    Host:        $OllamaHost" -ForegroundColor Gray
+    Write-Host "    Model:       $OllamaModel" -ForegroundColor Gray
+} else {
+    Write-Host "    Backend:     API" -ForegroundColor Gray
+    Write-Host "    Model:       $ModelName" -ForegroundColor Gray
+}
 Write-Host "    Transcripts: $TranscriptFolder" -ForegroundColor Gray
 Write-Host "    Workers:     $WorkerCount" -ForegroundColor Gray
 if ($Sections) { Write-Host "    Sections:    $Sections" -ForegroundColor Gray }
@@ -101,7 +113,11 @@ Write-Host "       [OK] Dependencies ready" -ForegroundColor Green
 # --- Step 3: Generate lesson content ---
 Write-Host ""
 Write-Host "[3/5] Generating lesson content from transcripts..." -ForegroundColor Yellow
-Write-Host "       (Calling NVIDIA API - may take several minutes)" -ForegroundColor DarkGray
+if ($Ollama) {
+    Write-Host "       (Calling local Ollama server - may take several minutes)" -ForegroundColor DarkGray
+} else {
+    Write-Host "       (Calling NVIDIA API - may take several minutes)" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 $generateArgs = @(
@@ -111,8 +127,11 @@ $generateArgs = @(
     "--course-title", $CourseTitle,
     "--workers", $WorkerCount
 )
-if ($Sections) { $generateArgs += @("--sections", $Sections) }
-if ($DryRun)   { $generateArgs += "--dry-run" }
+if ($Sections)     { $generateArgs += @("--sections", $Sections) }
+if ($DryRun)       { $generateArgs += "--dry-run" }
+if ($Ollama)       { $generateArgs += "--ollama" }
+if ($Force)        { $generateArgs += "--force" }
+if ($GlossaryOnly) { $generateArgs += "--glossary-only" }
 
 & py @generateArgs
 if ($LASTEXITCODE -ne 0) {

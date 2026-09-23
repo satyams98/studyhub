@@ -26,6 +26,14 @@ import l13 from './lessons/section13'
 
 import { sectionMeta as webfluxSections } from './webflux-sections'
 import { glossary as webfluxGlossary } from './webflux-glossary'
+
+import { sectionMeta as springBatchSections } from './spring-batch-sections'
+import { glossary as springBatchGlossary } from './spring-batch-glossary'
+import springBatch01 from './spring-batch-lessons/section01.json'
+import springBatch02 from './spring-batch-lessons/section02'
+import springBatch03 from './spring-batch-lessons/section03.json'
+import springBatch04 from './spring-batch-lessons/section04'
+import springBatch11 from './spring-batch-lessons/section11'
 import webflux01 from './webflux-lessons/section01'
 import webflux02 from './webflux-lessons/section02'
 import webflux03 from './webflux-lessons/section03'
@@ -41,6 +49,14 @@ import webflux12 from './webflux-lessons/section12'
 import webflux13 from './webflux-lessons/section13'
 const webfluxLessonsBySection = {
   1: webflux01, 2: webflux02, 3: webflux03, 4: webflux04, 5: webflux05, 6: webflux06, 7: webflux07, 8: webflux08, 9: webflux09, 10: webflux10, 11: webflux11, 12: webflux12, 13: webflux13,
+}
+
+const springBatchLessonsBySection = {
+  1: springBatch01,
+  2: springBatch02,
+  3: springBatch03,
+  4: springBatch04,
+  11: springBatch11,
 }
 
 
@@ -65,6 +81,19 @@ const courseDefs = [
     glossary: reactorGlossary,
   },
   // ── Add more courses below ────────────────────────────────────────────
+  {
+    slug: 'spring-batch',
+    title: 'Spring Batch',
+    subtitle: 'Field Guide',
+    description:
+      'Master Spring Batch from the core domain model to advanced partitioning and fault tolerance. ' +
+      'Covering Job, Step, chunk processing, ItemReader/Writer/Processor, and production patterns.',
+    color: '#E0A63A',
+    tags: ['Java', 'Spring', 'Batch'],
+    sectionMeta: springBatchSections,
+    lessonsBySection: springBatchLessonsBySection,
+    glossary: springBatchGlossary,
+  },
   {
     slug: 'webflux',
     title: 'Spring WebFlux',

@@ -1,0 +1,696 @@
+{
+  "slug": "batch",
+  "title": "Spring Batch Field Guide",
+  "subtitle": "A Complete Guide to Enterprise Batch Processing",
+  "description": "Master Spring Batch from first principles to distributed production pipelines. Seventeen sections covering chunk processing, partitioning, remote chunking, fault tolerance, and observability — grounded in a financial reconciliation domain.",
+  "color": "#E0A63A",
+  "tags": ["Java", "Spring", "Batch"],
+  "technicalBaseline": "Java 21 / Spring Boot 3.5.x / Spring Batch 5.2 / Jakarta namespace (not javax) / JobBuilder and StepBuilder take a JobRepository constructor argument directly (factories removed in 5.x) / Constructor injection throughout / @Configuration(proxyBeanMethods = false) preferred",
+  "runningDomain": "Financial end-of-day reconciliation pipeline. Entities: Trade (tradeId, instrument, quantity, price, tradeDate), Position (positionId, instrument, netQuantity), SettlementRecord (recordId, tradeId, settlementDate, amount, status), ReconciliationResult (tradeId, matched, variance). Package root: com.example.reconciliation. Table names: trade, position, settlement_record, reconciliation_result.",
+  "sections": [
+    {
+      "id": 1,
+      "title": "Foundations: The Batch Processing Mental Model",
+      "lessons": [
+        {
+          "id": "1.1",
+          "title": "What Spring Batch Solves",
+          "description": "bounded/repeatable/restartable jobs vs. streaming (Kafka) vs. real-time (WebFlux); why 'repeatable and restartable' beats a plain @Scheduled method; categories of work batch handles: ETL, file ingestion, end-of-day settlement, report generation; the cost of re-implementing restart logic from scratch."
+        },
+        {
+          "id": "1.2",
+          "title": "Where Batch Fits in an Event-Driven System",
+          "description": "a batch job as a bounded read against an unbounded topic; why polling a topic in a loop is not the same as a bounded batch run; how a Kafka-sourced batch job reads a finite offset window (a snapshot) rather than running indefinitely; architectural diagram of a nightly reconciliation job next to a continuously-running consumer."
+        },
+        {
+          "id": "1.3",
+          "title": "Batch vs. ETL Tools",
+          "description": "why teams choose code-first Spring Batch over Talend/Informatica: testability (unit-test readers/processors as plain Java), deployability alongside application code, version control, debuggability in a standard IDE, CI/CD pipeline integration; when a GUI ETL tool still wins (non-developer operators, pre-built connectors, drag-and-drop for quick wins)."
+        },
+        {
+          "id": "1.4",
+          "title": "The Five Pillars of Spring Batch",
+          "description": "chunk processing, restartability, skip/retry, scalability, transaction management introduced as a roadmap for the rest of the course; brief motivation for each pillar without deep-diving (those come in later sections); how the pillars compose to make a production-grade pipeline."
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Core Domain Model",
+      "lessons": [
+        {
+          "id": "2.1",
+          "title": "Job, JobInstance, JobExecution, and JobParameters",
+          "description": "Job is the recipe; JobInstance identifies one logical run keyed by JobParameters; identical parameters yield the same JobInstance, so rerunning throws JobInstanceAlreadyCompleteException; JobExecution is the physical attempt (there can be multiple failed attempts on one instance before a COMPLETED one); how an incrementer creates fresh instances each scheduled run."
+        },
+        {
+          "id": "2.2",
+          "title": "Step and StepExecution",
+          "description": "one StepExecution per step per JobExecution; what StepExecution tracks: read/write/skip/rollback counts; partitioned steps produce one StepExecution per partition (foreshadow section 11); how to query BATCH_STEP_EXECUTION to diagnose a partial failure."
+        },
+        {
+          "id": "2.3",
+          "title": "ExecutionContext",
+          "description": "job-level vs. step-level ExecutionContext; persisted to the JobRepository after each chunk commit; this is literally how FlatFileItemReader resumes at the correct line after a restart — it saves its current line number; what can and cannot be stored (must be serializable, keep it small); a crash mid-step loses only the current uncommitted chunk, not previously committed state."
+        },
+        {
+          "id": "2.4",
+          "title": "JobParametersIncrementer",
+          "description": "RunIdIncrementer pattern: appending a monotonically increasing run.id to JobParameters so each scheduled trigger produces a fresh JobInstance rather than attempting to rerun a COMPLETED one; custom incrementers (e.g., business-date-based); when you want a fresh instance vs. when you want to restart the same instance after a failure."
+        },
+        {
+          "id": "2.5",
+          "title": "BatchStatus vs. ExitStatus",
+          "description": "BatchStatus is the JVM-level state machine (STARTING, STARTED, STOPPING, STOPPED, FAILED, COMPLETED, ABANDONED) managed by the framework; ExitStatus is a string freely customizable by the step and used for flow decisions in section 12; a step can complete with BatchStatus.COMPLETED but ExitStatus 'NO_WORK_DONE' — the flow router acts on the ExitStatus string, not the BatchStatus enum."
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Job Configuration and the Job Repository",
+      "lessons": [
+        {
+          "id": "3.1",
+          "title": "JobRepository Purpose and Schema",
+          "description": "BATCH_JOB_INSTANCE, BATCH_JOB_EXECUTION, BATCH_JOB_EXECUTION_PARAMS, BATCH_JOB_EXECUTION_CONTEXT, BATCH_STEP_EXECUTION, BATCH_STEP_EXECUTION_CONTEXT — what each table stores; why partitioned or remote jobs write many BATCH_STEP_EXECUTION rows (one per partition); using the schema as a diagnostic tool: querying BATCH_STEP_EXECUTION to find the exact chunk where a job failed."
+        },
+        {
+          "id": "3.2",
+          "title": "JdbcJobRepository Setup",
+          "description": "configuring JdbcJobRepository: isolation level (SERIALIZABLE default, why), custom table prefix (spring.batch.jdbc.table-prefix), spring.batch.jdbc.initialize-schema (always/embedded/never); using an embedded H2 for fast local iteration vs. real Postgres for inspectable BATCH_STEP_EXECUTION rows; DataSource and transaction manager wiring."
+        },
+        {
+          "id": "3.3",
+          "title": "@EnableBatchProcessing — When to Add It and When Not To",
+          "description": "version-critical: in Spring Boot 3.x, BatchAutoConfiguration auto-configures a JobRepository, PlatformTransactionManager, and JobLauncher; adding @EnableBatchProcessing DISABLES that auto-config and takes over — only add it when you need to customize the JobRepository or transaction manager; the common mistake of cargo-culting @EnableBatchProcessing from Boot 2.x tutorials into a Boot 3.x project and then wondering why beans are duplicated or missing."
+        },
+        {
+          "id": "3.4",
+          "title": "JobBuilder and StepBuilder Fluent API",
+          "description": "JobBuilderFactory and StepBuilderFactory were removed in Spring Batch 5.x; JobBuilder and StepBuilder now take a JobRepository constructor argument directly; the fluent chain: new JobBuilder('reconciliationJob', jobRepository).start(step1).next(step2).build(); new StepBuilder('loadStep', jobRepository).chunk(500, transactionManager).reader(reader()).processor(processor()).writer(writer()).build(); common compile errors when migrating from 4.x factory style."
+        },
+        {
+          "id": "3.5",
+          "title": "Why There Is No In-Memory Repository Anymore",
+          "description": "the MapJobRepositoryFactoryBean was removed in Spring Batch 5.x; local development now requires a real embedded database (H2, HSQLDB, Derby) even for quick tests; why the map-based repository caused issues (no serialization, no multi-JVM support, subtle concurrent modification bugs); configuring an H2 embedded datasource that Spring Boot auto-initializes with the Batch schema."
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Chunk-Oriented and Tasklet-Oriented Processing",
+      "lessons": [
+        {
+          "id": "4.1",
+          "title": "The Read-Process-Write Loop and the Chunk Boundary",
+          "description": "items are read one at a time from the ItemReader, passed one at a time to the ItemProcessor, accumulated in a list, then the full list is handed to the ItemWriter; the chunk size is the commit interval — each chunk is one database transaction; the framework manages this loop automatically; what happens when ItemReader returns null (end of input)."
+        },
+        {
+          "id": "4.2",
+          "title": "Chunk Size vs. Commit Interval",
+          "description": "small chunks: more transactions, more BATCH_STEP_EXECUTION updates, lower memory pressure, finer restart granularity; large chunks: fewer transactions, higher throughput, but one rollback loses more work; a starting-point formula for reconciliation-scale volumes (50K-500K rows); how to measure actual chunk-commit rate in production logs and when a falling rate signals an SLA risk."
+        },
+        {
+          "id": "4.3",
+          "title": "Tasklet vs. Chunk-Oriented Steps",
+          "description": "Tasklet for single-shot operations: move a file, truncate a staging table, call a stored procedure, send a notification; chunk-oriented for item-by-item data processing; the mistake of forcing item-by-item logic into a Tasklet loop (loses skip/retry/restart granularity); a job that uses both: a Tasklet step to archive the previous day's file, then a chunk step to load today's file."
+        },
+        {
+          "id": "4.4",
+          "title": "Chunk Transaction Mechanics",
+          "description": "a transaction begins before the first read in a chunk and commits after the writer returns successfully; a mid-chunk exception on item N rolls back the entire chunk (items 1 through N are re-read and re-processed on retry); the transaction wraps the write, not individual reads/processes; what this means for idempotency: if the writer partially succeeds before an exception, the whole chunk re-runs on restart.",
+          "crossRefs": ["10.1"]
+        },
+        {
+          "id": "4.5",
+          "title": "The Tasklet Interface",
+          "description": "Tasklet.execute(StepContribution, ChunkContext) returns RepeatStatus.FINISHED (done) or RepeatStatus.CONTINUABLE (call me again); canonical use cases: deleting a staging directory with ProcessBuilder, calling a stored procedure via JdbcTemplate, invoking an external system command; how ChunkContext gives access to the step's ExecutionContext for state persistence between CONTINUABLE invocations."
+        },
+        {
+          "id": "4.6",
+          "title": "StepContribution and Manual State Reporting",
+          "description": "a chunk-oriented step automatically tracks read/write/skip/rollback counts via StepContribution; a Tasklet has no such loop — if you process 10,000 records inside a Tasklet loop, none of that is reflected in the StepExecution counts unless you call contribution.incrementReadCount() / incrementWriteCount() yourself; why this matters for monitoring dashboards and audit logs."
+        },
+        {
+          "id": "4.7",
+          "title": "When a Tasklet Becomes an Anti-Pattern",
+          "description": "cramming item-by-item logic into one big Tasklet loop: no per-item skip (one bad record fails the whole step), no per-chunk retry, no restart granularity (the step re-runs from the beginning on restart), no automatic progress tracking; the smell: a Tasklet containing a for-loop over a ResultSet or a List; how to refactor it into a proper chunk-oriented step."
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Item Readers — Deep Dive",
+      "lessons": [
+        {
+          "id": "5.1",
+          "title": "FlatFileItemReader",
+          "description": "LineMapper chain: DefaultLineMapper wraps a LineTokenizer (DelimitedLineTokenizer, FixedLengthTokenizer) and a FieldSetMapper; RecordFieldSetMapper introduced in Spring Batch 5.0 maps directly to Java records (no boilerplate FieldSetMapper implementation); encoding, linesToSkip (header), strict mode; how the reader saves its current line number in the ExecutionContext for restart."
+        },
+        {
+          "id": "5.2",
+          "title": "JdbcCursorItemReader vs. JdbcPagingItemReader",
+          "description": "JdbcCursorItemReader opens one JDBC connection and streams rows via a scrollable cursor for the entire step — fast but holds a connection for potentially hours; JdbcPagingItemReader closes and re-opens a connection per page using LIMIT/OFFSET (or database-specific paging) — slower per page but connection-budget-friendly; choosing based on step duration, connection pool size, and whether the data can change between pages (cursor snapshot vs. paging drift risk)."
+        },
+        {
+          "id": "5.3",
+          "title": "JpaPagingItemReader Gotchas",
+          "description": "JpaPagingItemReader uses JPA pagination under the hood; the EntityManager's first-level cache accumulates all entities across all pages and is never cleared between pages by default, causing heap growth proportional to total rows read; the fix: set entityManagerFactory and call clear() on the EntityManager in a ChunkListener afterChunk hook, or use saveState=false when order is not needed for restart."
+        },
+        {
+          "id": "5.4",
+          "title": "JsonItemReader and StaxEventItemReader",
+          "description": "JsonItemReader wraps a JacksonJsonObjectReader for streaming JSON array parsing — the entire array is not loaded into memory; StaxEventItemReader does event-based XML parsing, useful for very large XML files; choosing between them: JSON is preferred for new integrations, StAX for legacy XML pipelines; how each saves position in the ExecutionContext for restart."
+        },
+        {
+          "id": "5.5",
+          "title": "KafkaItemReader",
+          "description": "reading a bounded offset window from a Kafka topic for a batch run — the reader is configured with explicit partition and offset ranges and stops when it reaches the end offset; contrast with an unbounded @KafkaListener which runs forever; use case: nightly batch that processes exactly the messages produced during business hours; partition assignment and consumer group considerations.",
+          "crossRefs": ["1.2"]
+        },
+        {
+          "id": "5.6",
+          "title": "Writing a Custom ItemReader",
+          "description": "correct EOF signaling: return null when there is no more data (the framework stops the loop); implement ItemStream (open, update, close) to save state to ExecutionContext for restart support; the open() method receives ExecutionContext and should restore position; update() is called after each chunk commit; close() releases resources; thread-safety: if the reader will be used with a task executor, it must be synchronized (or use SynchronizedItemStreamReader as a wrapper)."
+        },
+        {
+          "id": "5.7",
+          "title": "Restart-Safe Positioning Per Reader Type",
+          "description": "FlatFileItemReader tracks the current line number automatically in ExecutionContext; JdbcCursorItemReader tracks rows read; JdbcPagingItemReader tracks the page offset; custom readers must explicitly save and restore position; the subtle danger with cursor-based readers: if the underlying data changes between a crash and a restart (rows inserted, updated), resuming at 'row 5000' may replay different data than what was already committed.",
+          "crossRefs": ["9.3", "9.4"]
+        },
+        {
+          "id": "5.8",
+          "title": "JMS and AMQP Item Readers",
+          "description": "reading a JMS queue or AMQP topic as a bounded batch source using JmsItemReader or AmqpItemReader; contrast with a continuously-running @JmsListener / @RabbitListener which is designed for endless streams; the pattern: drain the queue to a fixed count or read until no messages for N milliseconds; ack semantics relative to the chunk transaction — messages should only be acknowledged after the chunk commits.",
+          "crossRefs": ["7.6"]
+        },
+        {
+          "id": "5.9",
+          "title": "Hibernate-Based Readers",
+          "description": "HibernateCursorItemReader and HibernatePagingItemReader use Hibernate's Session API instead of JPA's EntityManager; why they still appear in legacy codebases that predate Spring Data JPA adoption; the same first-level cache growth problem as JpaPagingItemReader (lesson 5.3) applies here; migrating from Hibernate-based readers to JPA-based readers in a Spring Boot 3.x project.",
+          "crossRefs": ["5.3"]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Item Processors — Deep Dive",
+      "lessons": [
+        {
+          "id": "6.1",
+          "title": "Validation and Transformation Patterns",
+          "description": "an ItemProcessor<I,O> maps input type I to output type O; keeping processors stateless is critical for thread safety in multi-threaded steps (section 11); Bean Validation integration: BeanValidatingItemProcessor wraps a Validator; transforming SettlementRecord into ReconciliationResult; separating validation from transformation with CompositeItemProcessor (lesson 6.3).",
+          "crossRefs": ["11.2"]
+        },
+        {
+          "id": "6.2",
+          "title": "Filtering via Null Return",
+          "description": "returning null from process() silently drops the item — it is not passed to the writer and not counted as written; how filtering affects StepExecution counts: read count increments, but write count does not; use case: dropping SettlementRecord rows with status CANCELLED before writing ReconciliationResult; why filtering in a processor is preferable to filtering in the writer (cleaner separation of concerns)."
+        },
+        {
+          "id": "6.3",
+          "title": "CompositeItemProcessor",
+          "description": "chaining multiple processors where the output type of each must match the input type of the next; building a pipeline: validate (BeanValidatingItemProcessor) -> enrich (add exchange rate) -> transform (SettlementRecord to ReconciliationResult); how to wire a CompositeItemProcessor as a Spring bean; null propagation: if any delegate returns null, the chain short-circuits and the item is dropped.",
+          "crossRefs": ["6.2"]
+        },
+        {
+          "id": "6.4",
+          "title": "ClassifierCompositeItemProcessor",
+          "description": "routing items to different processors based on a Classifier function; use case: reconciliation records with multiple currencies need currency-specific conversion logic — USD, EUR, GBP routes to different ConversionProcessor beans; the Classifier interface and BackToBackPatternClassifier; contrast with CompositeItemProcessor (sequential chain) vs. ClassifierCompositeItemProcessor (branching route)."
+        },
+        {
+          "id": "6.5",
+          "title": "Writing a Custom ItemProcessor",
+          "description": "implementing enrichment against an external system inside process(): DB lookup (current exchange rate), REST call (counterparty credit status); the performance trap: per-item I/O inside process() makes N calls for N items; when to reach for chunk-level pre-loading instead (load a Map<instrument, rate> before the chunk in a ChunkListener.beforeChunk hook); thread-safety: if the processor holds state or accesses shared resources, it must be synchronized or scoped per-thread.",
+          "crossRefs": ["6.1"]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Item Writers — Deep Dive",
+      "lessons": [
+        {
+          "id": "7.1",
+          "title": "FlatFileItemWriter and JdbcBatchItemWriter",
+          "description": "FlatFileItemWriter: LineAggregator chain (PassThroughLineAggregator, FormattedLineAggregator, DelimitedLineAggregator); append vs. overwrite (shouldDeleteIfExists, appendAllowed); JdbcBatchItemWriter: uses Spring's JdbcTemplate batchUpdate under the hood for efficient batched SQL; BeanPropertyItemSqlParameterSourceProvider vs. a custom ItemSqlParameterSourceProvider; assertUpdates flag catches rows that were silently not updated."
+        },
+        {
+          "id": "7.2",
+          "title": "JpaItemWriter Flush Behavior",
+          "description": "JpaItemWriter calls EntityManager.merge() for each item then EntityManager.flush() once after all items in the chunk are processed — flush happens inside the chunk's transaction before commit; merge vs. persist semantics: merge works for both new and existing entities, persist only for new; the implication: the flush-then-commit sequence means any constraint violation surfaces at flush time, before the chunk transaction commits."
+        },
+        {
+          "id": "7.3",
+          "title": "CompositeItemWriter and ClassifierCompositeItemWriter",
+          "description": "CompositeItemWriter sends the entire chunk to multiple writers sequentially (same items to multiple destinations — e.g., write ReconciliationResult to DB and also to a CSV audit file); ClassifierCompositeItemWriter routes different items to different writers based on a Classifier (e.g., matched records go to the reconciliation_result table, unmatched records go to an exceptions CSV); both delegate to the underlying writers' open/update/close lifecycle methods.",
+          "crossRefs": ["6.4"]
+        },
+        {
+          "id": "7.4",
+          "title": "KafkaItemWriter",
+          "description": "publishing reconciled results to a Kafka topic using KafkaItemWriter; it uses KafkaTemplate.sendDefault() for each item; acks-all producer config for durability; the critical caveat: Kafka sends happen outside the JDBC transaction — see lesson 7.5; use case in the reconciliation pipeline: publishing ReconciliationResult events downstream to a risk system.",
+          "crossRefs": ["7.5"]
+        },
+        {
+          "id": "7.5",
+          "title": "The Two-System Transactional Trap",
+          "description": "writing to a DB and publishing to Kafka within the same chunk step is not atomic: if the DB write succeeds but the Kafka publish fails (or vice versa), the systems are inconsistent; if a rollback happens after a Kafka publish already succeeded, the message was already delivered and cannot be recalled; the standard fix: the Outbox pattern — write the event to an OUTBOX table in the same DB transaction, then a separate process (Debezium CDC or a polling publisher) publishes it to Kafka transactionally.",
+          "crossRefs": ["10.2", "10.3"]
+        },
+        {
+          "id": "7.6",
+          "title": "JMS and AMQP Item Writers",
+          "description": "publishing a completed chunk's results to a JMS queue or AMQP exchange as a batch sink; JmsItemWriter uses JmsTemplate.send(); AmqpItemWriter uses AmqpTemplate.convertAndSend(); the same two-system trap from lesson 7.5 applies: JMS with a JTA-capable transaction manager can be made atomic with the DB write, but AMQP/RabbitMQ and Kafka cannot; configuring a JtaTransactionManager for JMS+JDBC atomicity.",
+          "crossRefs": ["7.5", "10.4"]
+        },
+        {
+          "id": "7.7",
+          "title": "Writing a Custom ItemWriter",
+          "description": "implementing write(Chunk<T> items) correctly: the items list contains all items in the chunk — batch them into a single bulk call rather than calling once per item; the anti-pattern: iterating over items and making one downstream call per item (negates the entire point of chunk-based batching); example: a custom REST bulk-insert writer that POSTs all items in a single HTTP request; implementing ItemStream for checkpoint support."
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Listeners and Lifecycle Hooks",
+      "lessons": [
+        {
+          "id": "8.1",
+          "title": "JobExecutionListener",
+          "description": "beforeJob(JobExecution) and afterJob(JobExecution); use cases: bootstrapping state before the job starts (validate input file exists, initialize a counter), finalizing state after (send completion email, archive output file, record audit entry); accessing the JobExecution's BatchStatus in afterJob to distinguish success from failure; registering a listener on the JobBuilder with .listener()."
+        },
+        {
+          "id": "8.2",
+          "title": "StepExecutionListener and ChunkListener",
+          "description": "StepExecutionListener: beforeStep(StepExecution) and afterStep(StepExecution) return ExitStatus (can override the step's exit status for flow routing); ChunkListener: beforeChunk(ChunkContext), afterChunk(ChunkContext), afterChunkError(ChunkContext) — fired around each chunk transaction; ChunkListener use case: pre-loading a rate lookup Map before each chunk to amortize DB round-trips across the chunk's items.",
+          "crossRefs": ["6.5"]
+        },
+        {
+          "id": "8.3",
+          "title": "ItemReadListener, ItemProcessListener, and ItemWriteListener",
+          "description": "fine-grained hooks for each phase: onReadError/onProcessError/onWriteError for per-item error logging; onWriteError receives the exception and the full List of items that were being written — essential for logging which items failed; contrast with SkipListener (lesson 8.4) which fires when an item is ultimately skipped rather than just when an error occurs."
+        },
+        {
+          "id": "8.4",
+          "title": "SkipListener and the Audit Trail Use Case",
+          "description": "SkipListener.onSkipInRead/onSkipInProcess/onSkipInWrite fire when an item is definitively skipped (after exhausting skip-limit retries); in financial batch jobs, logging skipped items is a compliance requirement — every skipped reconciliation record must be traceable in an audit log with the reason; implementing a SkipListener that writes to a dedicated skip_audit table; why this is different from onReadError (an error may retry, a skip is final).",
+          "crossRefs": ["9.1"]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Fault Tolerance: Skip, Retry, and Restart",
+      "lessons": [
+        {
+          "id": "9.1",
+          "title": "faultTolerant — Skip vs. Retry vs. No-Rollback",
+          "description": "faultTolerant() activates Spring Batch's fault-tolerance engine; skip: after skipLimit is reached for a given exception type, the item is dropped (not written) and the step continues; retry: the framework re-attempts the same item up to retryLimit times before deciding to skip it; noRollback: the chunk transaction commits even when this exception type is thrown — use with extreme care for non-transactional side effects that cannot be rolled back."
+        },
+        {
+          "id": "9.2",
+          "title": "skipLimit, retryLimit, and Exception-Specific Policies",
+          "description": "mapping exception classes explicitly: .skip(ValidationException.class).skipLimit(100) drops up to 100 validation failures; .retry(TransientDataAccessException.class).retryLimit(3) re-attempts transient DB errors; .noRollback(OptimisticLockingFailureException.class); combining with BackOffPolicy: fixed delay (1s between retries) vs. exponential backoff (1s, 2s, 4s); RetryTemplate for fine-grained retry control outside of chunk steps."
+        },
+        {
+          "id": "9.3",
+          "title": "Idempotency and Restart",
+          "description": "on restart, Spring Batch resumes from the last committed chunk — it never re-reads or re-writes items from already-committed chunks; the framework reads the step's ExecutionContext from the JobRepository to know where to resume (e.g., FlatFileItemReader restores its line number); idempotency requirement: if the writer uses INSERT and the step is restarted after a partial write, the same items may be written again — use INSERT ... ON CONFLICT DO NOTHING or a natural dedup key.",
+          "crossRefs": ["2.3", "4.4"]
+        },
+        {
+          "id": "9.4",
+          "title": "ExecutionContext State on Restart",
+          "description": "built-in ItemStream readers (FlatFileItemReader, JdbcCursorItemReader) automatically save and restore their position; custom components that implement ItemStream must explicitly save state in update(ExecutionContext) and restore it in open(ExecutionContext); what to save: the minimum necessary to resume (e.g., last processed ID, current page number); what not to save: large objects, mutable state that can be recomputed from the stored key.",
+          "crossRefs": ["5.6", "5.7"]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Transactions and Non-Transactional Resources",
+      "lessons": [
+        {
+          "id": "10.1",
+          "title": "Chunk Transaction Boundaries",
+          "description": "deep dive on the transaction lifecycle that was introduced in lesson 4.4: the transaction manager used by the chunk step is the one passed to StepBuilder.chunk(size, transactionManager); the transaction begins before the first read, includes all reads and processes, and commits after the writer returns; rollback on any exception rolls back the entire chunk's DB writes; implications for the writer's idempotency requirements on restart.",
+          "crossRefs": ["4.4"]
+        },
+        {
+          "id": "10.2",
+          "title": "The Kafka and REST Inside-a-Chunk Trap",
+          "description": "generalizes lesson 7.5: any non-transactional resource inside a chunk step — Kafka publish, REST POST, file write — cannot be rolled back when the JDBC transaction rolls back; scenarios where this produces inconsistency: a Kafka message is published in the writer, then the DB write fails and rolls back — the message is already in Kafka; REST calls inside a processor that fail partway through a chunk rollback; designing around this pattern.",
+          "crossRefs": ["7.5"]
+        },
+        {
+          "id": "10.3",
+          "title": "Compensating Patterns",
+          "description": "the Outbox pattern: write events to an OUTBOX table in the same DB transaction as the main write, then a separate transactional outbox publisher reads and delivers them to Kafka/JMS; idempotent write strategy: key every write on a natural business key (tradeId + settlementDate) with ON CONFLICT DO NOTHING or UPSERT — so rerunning a chunk that partially succeeded does not double-count; choosing between Outbox and idempotent writes based on event-delivery semantics requirements.",
+          "crossRefs": ["7.5", "9.3"]
+        },
+        {
+          "id": "10.4",
+          "title": "PlatformTransactionManager Config With Mixed Resources",
+          "description": "when a step writes to both a JDBC datasource and a JMS/AMQP broker, the default DataSourceTransactionManager covers only JDBC; for XA/two-phase-commit atomicity, you need a JtaTransactionManager (Atomikos, Narayana); in Boot 3.x, Spring Boot's auto-configured transaction manager is DataSourceTransactionManager — mixing JMS requires explicitly defining your own JtaTransactionManager bean; Kafka's lack of XA support means Kafka + JDBC can never be XA-atomic.",
+          "crossRefs": ["7.6"]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Scaling Batch Jobs",
+      "lessons": [
+        {
+          "id": "11.1",
+          "title": "Architecture 1: Single-Threaded Processing",
+          "description": "sequential read-process-write on one thread in one JVM; the default and correct baseline for most batch jobs; best suited for: under ~100K records, order-sensitive logic (where item N depends on item N-1), low-frequency overnight jobs, or jobs where the complexity of scaling outweighs the throughput benefit; recognizing SLA risk early: a falling chunk-commit rate (e.g., chunks are taking 3s instead of 1s) is the first warning sign before the batch window is missed."
+        },
+        {
+          "id": "11.2",
+          "title": "Multi-Threaded Steps",
+          "description": "adding a TaskExecutor to a chunk step via .taskExecutor(executor).throttleLimit(N) — multiple threads process different chunks concurrently without a Partitioner; the critical gotcha: reader/processor/writer bean instances are shared across threads unless explicitly wrapped or scoped; FlatFileItemReader is NOT thread-safe — wrap with SynchronizedItemStreamReader; JdbcCursorItemReader is NOT thread-safe — prefer JdbcPagingItemReader for multi-threaded steps; this architecture provides real concurrency but without partitioning's data-isolation guarantees; a natural stepping stone before committing to full partitioning.",
+          "crossRefs": ["11.3", "11.6"]
+        },
+        {
+          "id": "11.3",
+          "title": "Partitioning Prerequisites: @StepScope and ExecutionContext",
+          "description": "@StepScope resolves a bean lazily, once per StepExecution, using SpEL from the step's ExecutionContext — #{stepExecutionContext['minId']}; forgetting @StepScope is the #1 partitioning bug: without it, the reader bean is created once at application startup before any partition context exists, so all partitions share the same reader instance initialized with no partition data; step-scoped beans work with @Bean and @StepScope on the method.",
+          "crossRefs": ["11.4"]
+        },
+        {
+          "id": "11.4",
+          "title": "Architecture 2: Local Partitioning — the Partitioner Contract",
+          "description": "the Partitioner interface: partition(gridSize) returns Map<String, ExecutionContext> where each entry is a named partition with its own ExecutionContext containing the partition's parameters (minId, maxId); gridSize is a hint — the Partitioner may return fewer or more partitions than requested; the master step delegates to slave steps running in a local thread pool; all slaves run in the same JVM and share the application context.",
+          "crossRefs": ["11.3"]
+        },
+        {
+          "id": "11.5",
+          "title": "Partition Strategies and the Straggler Problem",
+          "description": "range-based partitioning (e.g., divide tradeId 1-1,000,000 into 10 equal ranges of 100K): simple but skew-prone if data is unevenly distributed by ID; modulo-based partitioning (tradeId % N = partition): distributes skew more evenly but makes range queries harder; dynamic partitioning by actual row count per range (query the min/max for each partition boundary before partitioning): most accurate but requires an upfront scan; the straggler problem: one uneven partition with 10x the data of the others serializes the step — the master waits for all slaves, so the slowest partition sets the wall-clock time.",
+          "crossRefs": ["11.6"]
+        },
+        {
+          "id": "11.6",
+          "title": "TaskExecutorPartitionHandler and Thread-Safety Audit",
+          "description": "TaskExecutorPartitionHandler.gridSize controls how many slave steps are submitted; the TaskExecutor's pool size determines actual concurrency — if gridSize=10 and pool size=4, only 4 run at once; auditing thread safety: beans created once at application startup (not @StepScoped) are shared — readers, processors, writers must be thread-safe or @StepScoped; stateless processors are safe; stateful processors (accumulating a running total) are not.",
+          "crossRefs": ["11.3", "11.5"]
+        },
+        {
+          "id": "11.7",
+          "title": "Java 21 Virtual Threads for Batch",
+          "description": "SimpleAsyncTaskExecutor.setVirtualThreads(true) enables virtual threads for the partition task executor; real benefit is for I/O-bound steps where threads spend most of their time waiting (DB queries, REST calls, file I/O) — virtual threads eliminate the platform-thread parking cost; for CPU-bound processing, virtual threads offer no advantage over platform threads; the synchronized-block pinning caveat: code inside a synchronized block pins the virtual thread to its carrier platform thread, eliminating the I/O benefit — verify your JDBC driver and object pools do not use synchronized blocks that pinning would trigger on your exact JDK version.",
+          "crossRefs": ["11.4", "11.6"]
+        },
+        {
+          "id": "11.8",
+          "title": "StepExecutionAggregator",
+          "description": "after all slave partitions complete, the DefaultStepExecutionAggregator rolls up their read/write/skip counts into the master step's StepExecution; the default aggregation policy: if any slave has BatchStatus.FAILED, the master step is also FAILED; ExitStatus aggregation follows the same hierarchy; custom aggregators can implement different roll-up strategies (e.g., tolerate N failed partitions before failing the master).",
+          "crossRefs": ["11.4"]
+        },
+        {
+          "id": "11.9",
+          "title": "Architecture 3: Remote Partitioning with MessageChannelPartitionHandler",
+          "description": "slave workers run in separate JVMs and receive partition instructions via a message broker; the master step uses MessageChannelPartitionHandler, which sends StepExecutionRequest messages to workers and polls the JobRepository via JobExplorer at a configurable pollInterval rather than being pushed results back; pollInterval is a real tradeoff: too short hammers the shared DB, too long adds latency to job completion detection; the master is done when all expected slave StepExecutions reach a terminal status in the JobRepository.",
+          "crossRefs": ["11.14", "11.15"]
+        },
+        {
+          "id": "11.10",
+          "title": "Serialization Requirements for Remote Partitioning",
+          "description": "StepExecutionRequest and its embedded ExecutionContext (the partition parameters) must be serializable when sent over the message broker; non-serializable objects in the partition ExecutionContext (e.g., a Spring DataSource, a Hibernate Session) fail at message-send time with a NotSerializableException; keep partition metadata to primitives and Strings (minId: long, maxId: long, partitionName: String); Jackson2ExecutionContextStringSerializer is the default serializer for ExecutionContext in Boot 3.x.",
+          "crossRefs": ["11.9"]
+        },
+        {
+          "id": "11.11",
+          "title": "Broker Choice: JMS/AMQP vs. Kafka",
+          "description": "JMS/AMQP (ActiveMQ, RabbitMQ) have a natural point-to-point request/reply model: master sends to a work queue, workers consume and reply to a reply queue; Kafka has no native reply-queue concept because topics are append-only and consumer groups do not support request/reply semantics out of the box; for remote partitioning over Kafka, you must create an explicit reply topic per job run (with a correlation ID) and manually manage partition assignment; JMS/AMQP is significantly simpler for the remote partitioning pattern.",
+          "crossRefs": ["11.9", "11.12"]
+        },
+        {
+          "id": "11.12",
+          "title": "The Kafka Concurrency Ceiling",
+          "description": "Kafka consumer concurrency is bounded by the number of partitions in the topic — you cannot have more active consumers than partitions; the partition count is set at topic creation and changing it later (adding partitions) reorders data and breaks consumer offset expectations; this means Kafka's concurrency ceiling for remote partitioning is fixed at topic-creation time with no out-of-the-box dynamic worker scaling, unlike a JMS queue which scales workers freely without reconfiguring the queue.",
+          "crossRefs": ["11.11"]
+        },
+        {
+          "id": "11.13",
+          "title": "Idempotency Under At-Least-Once Delivery",
+          "description": "with JMS/AMQP and at-least-once delivery, a partition message may be redelivered if the worker crashes before acknowledging; the worker's writer must tolerate reprocessing the same partition without double-writing (idempotent writes: INSERT ... ON CONFLICT DO NOTHING, or check-then-insert keyed on partitionId + tradeId); how the Outbox pattern from lesson 10.3 also protects against at-least-once redelivery of events.",
+          "crossRefs": ["10.3", "9.3"]
+        },
+        {
+          "id": "11.14",
+          "title": "Shared JobRepository Contention at Multi-JVM Scale",
+          "description": "in Architecture 3, many slave JVMs are concurrently updating BATCH_STEP_EXECUTION rows in the shared JobRepository database; the serializable isolation level of the JobRepository's transaction manager (lesson 3.2) creates lock contention at scale; connection pool sizing on the slave side: each slave needs enough connections to handle its step executions concurrently; the master's pollInterval (lesson 11.9) directly contributes to DB query load.",
+          "crossRefs": ["3.2", "11.9"]
+        },
+        {
+          "id": "11.15",
+          "title": "Failure and Restart Semantics for Remote Partitions",
+          "description": "when a slave JVM crashes mid-partition, its StepExecution stays in status STARTED indefinitely in the JobRepository — the framework does not auto-transition it to FAILED; the master is waiting for all partitions to reach a terminal status, so it waits forever; you need an external timeout/health-check strategy: a monitor that detects partitions stuck in STARTED beyond a threshold and marks them FAILED; restart: re-running the job restart picks up FAILED partitions (not COMPLETED ones).",
+          "crossRefs": ["11.9", "11.14"]
+        },
+        {
+          "id": "11.16",
+          "title": "Remote Chunking vs. Remote Partitioning — the Conceptual Split",
+          "description": "remote partitioning: the reader runs on each slave, distributing data reading AND processing+writing across JVMs — each slave reads its own partition of data; remote chunking: the reader runs only on the manager node, which reads items and sends them in chunks to workers for processing and writing — the manager is the data producer, workers are the processing consumers; key difference: in remote chunking, the manager can become a bottleneck (single-threaded reader), while in remote partitioning, reading is also distributed.",
+          "crossRefs": ["11.17", "11.9"]
+        },
+        {
+          "id": "11.17",
+          "title": "Remote Chunking Deep Dive: Manager and Worker Builders",
+          "description": "RemoteChunkingManagerStepBuilder configures the manager step: it reads items locally and sends them as ChunkRequest messages to workers via a MessageChannel; RemoteChunkingWorkerBuilder configures the worker: it receives ChunkRequest messages, processes items with the configured processor and writer, and sends ChunkResponse messages back; ChunkProcessorChunkHandler on the worker side unwraps the ChunkRequest and delegates to the configured processor/writer; individual items (not partition metadata) travel over the wire.",
+          "crossRefs": ["11.16"]
+        },
+        {
+          "id": "11.18",
+          "title": "Remote Chunking: Ordering and Transactional Messaging",
+          "description": "since workers process items outside the manager's local transaction, remote chunking requires transactional/acknowledged messaging so that a manager crash during in-flight chunk delivery does not permanently lose those items; the manager must wait for a ChunkResponse ACK before committing the chunk's progress; contrast with remote partitioning's simpler recovery story: if a slave dies, you re-run the partition from scratch; remote chunking requires the messaging layer to provide at-least-once delivery guarantees to achieve equivalent durability.",
+          "crossRefs": ["11.16", "11.17"]
+        },
+        {
+          "id": "11.19",
+          "title": "Local Chunking and SEDA-Style Processing",
+          "description": "introduced in Spring Batch 5.2: BlockingQueueItemReader and BlockingQueueItemWriter enable in-JVM staged processing (SEDA — Staged Event-Driven Architecture); a producer step writes to an in-memory BlockingQueue, and one or more consumer steps read from it concurrently — within one JVM, no broker required; a middle ground between plain multi-threading (lesson 11.2) and full remote chunking (lesson 11.17); Spring Batch 6.0 polishes the API."
+        },
+        {
+          "id": "11.20",
+          "title": "Choosing Between the Five Scaling Approaches",
+          "description": "decision framework: (1) start with single-threaded until a measured SLA miss requires more; (2) add multi-threaded step (lesson 11.2) as the lowest-friction upgrade — shared reader requires SynchronizedItemStreamReader wrapper; (3) upgrade to local partitioning (lesson 11.4) for data isolation and higher throughput without broker infra; (4) reach for remote partitioning or remote chunking only if broker infrastructure is already operated by the team; (5) the biggest mistake: choosing Kafka-based remote partitioning 'because we already have Kafka' without accounting for the reply-topic complexity and concurrency ceiling.",
+          "crossRefs": ["11.1", "11.2", "11.4", "11.9", "11.16"]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Flow Control",
+      "lessons": [
+        {
+          "id": "12.1",
+          "title": "Sequential Steps and Conditional Transitions",
+          "description": ".start(step1).next(step2) for sequential flow; conditional transitions with .on(pattern).to(step): the pattern matches against the ExitStatus string (lesson 2.5), not the BatchStatus enum; wildcard matching: '*' matches any characters; if no .on() transition matches, the job fails by default; building a reconciliation flow: load step -> validate step -> if ExitStatus 'NO_RECORDS' skip enrich step -> write step.",
+          "crossRefs": ["2.5"]
+        },
+        {
+          "id": "12.2",
+          "title": "JobExecutionDecider",
+          "description": "implementing JobExecutionDecider for branching logic that cannot be expressed as a step's own exit status: check a database flag, evaluate a business rule, compare two step results; decide(JobExecution, StepExecution) returns a FlowExecutionStatus; wiring a decider into the job flow with .next(decider).on('PROCESS').to(processStep).on('SKIP').to(archiveStep)."
+        },
+        {
+          "id": "12.3",
+          "title": "Split Flows",
+          "description": "parallel independent step paths within one job using .split(taskExecutor).add(flow1, flow2); split flows parallelize different steps (e.g., load trades from file A and load positions from file B concurrently), not the same step's data (that is partitioning from section 11); both flows must complete before the job continues to the next step after the split; the task executor determines how many flows run in parallel.",
+          "crossRefs": ["11.4"]
+        },
+        {
+          "id": "12.4",
+          "title": "Externalized and Reusable Flow Definitions",
+          "description": "defining a Flow bean with FlowBuilder and reusing it across multiple jobs; use case: a standard validation-and-archive flow shared by a daily reconciliation job and a monthly report job; Flow composition reduces duplication; a Flow can itself contain splits, decisions, and steps; registering a flow with .from(flow1).next(step3) embeds it in a parent job's flow."
+        },
+        {
+          "id": "12.5",
+          "title": "Terminal Transitions: fail() and stop()",
+          "description": "fail() unconditionally fails the job regardless of what the step returned; stop() pauses the job in STOPPED status — it can be restarted from the stopping step; the difference from a step returning a FAILED ExitStatus: a FAILED exit status can be routed by .on('FAILED').to(compensationStep), but fail() terminates without routing; use stop() for 'requires human intervention' scenarios — the operator fixes the issue and restarts the job from where it paused.",
+          "crossRefs": ["12.1"]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Operating Jobs in Production",
+      "lessons": [
+        {
+          "id": "13.1",
+          "title": "JobLauncher vs. JobOperator",
+          "description": "version-critical: in Spring Batch 5.x, JobLauncher.run(job, params) starts a new job execution; JobOperator.restart(executionId) restarts a failed execution; JobExplorer queries the JobRepository for past executions; in Spring Batch 6.0, these are unified into a single JobOperator interface with a richer API — flag which version before writing launch code; the common mistake of calling JobLauncher for a restart instead of JobOperator (creates a new execution instead of resuming)."
+        },
+        {
+          "id": "13.2",
+          "title": "Triggering: Scheduled vs. External Orchestrators",
+          "description": "@Scheduled for simple time-based triggers within the Spring application; Quartz for more complex schedules with clustering; external orchestrators (Control-M, Airflow, Kubernetes CronJob) for enterprise environments with existing scheduler infrastructure; the tradeoffs: @Scheduled is simple but not distributed and relies on the app staying up; K8s CronJob handles restarts but loses job history across pod restarts without a persistent JobRepository; Airflow provides lineage, dependency graphs, and retry policies at the orchestration level."
+        },
+        {
+          "id": "13.3",
+          "title": "Exposing Job Trigger and Status via REST",
+          "description": "designing an idempotent trigger endpoint: POST /jobs/reconciliation/trigger accepts a businessDate parameter; use a JobParametersIncrementer (lesson 2.4) to ensure each trigger creates a fresh JobInstance even for the same businessDate; return the JobExecution ID so callers can poll a GET /jobs/executions/{id}/status endpoint; polling endpoint uses JobExplorer.getJobExecution(id) to return BatchStatus and read/write counts; handling concurrent trigger requests gracefully.",
+          "crossRefs": ["2.4"]
+        },
+        {
+          "id": "13.4",
+          "title": "Graceful Shutdown",
+          "description": "Spring Batch 6.0 introduced a controlled shutdown mechanism that signals running steps to stop at the next safe checkpoint (chunk boundary) rather than being abruptly killed; the step's StepExecution is saved to the JobRepository with a consistent final state before the JVM exits; this makes the job restart-safe even when the container is stopped during execution; in 5.x, an abrupt JVM kill leaves the StepExecution in STARTED — the restart logic handles this but restart begins from the last committed chunk, not a cleaner stop point."
+        },
+        {
+          "id": "13.5",
+          "title": "Spring Cloud Data Flow: Orchestrating Batch Jobs in the Cloud",
+          "description": "Spring Cloud Data Flow (SCDF) treats Spring Batch jobs as Tasks: short-lived processes registered by Docker image or Maven artifact; registering a Spring Batch application as an SCDF Task; launching, scheduling, and monitoring tasks via the SCDF dashboard or REST API; SCDF stores task execution history in its own database (separate from the Batch JobRepository — the Batch app still needs its own schema); how SCDF handles multi-instance deployment and launch parameters."
+        },
+        {
+          "id": "13.6",
+          "title": "SCDF Task Execution vs. Direct JobLauncher Use",
+          "description": "when SCDF earns its complexity: multiple batch jobs that depend on each other (pipeline DAGs), team-operated cloud environment, need for a centralized launch/monitoring UI, multiple environments (dev/staging/prod) with one SCDF cluster; when a simpler REST-triggered job (lesson 13.3) is enough: single-team ownership, already-deployed Spring Boot app, no broker infra for SCDF, jobs that don't need cross-service orchestration.",
+          "crossRefs": ["13.3", "13.5"]
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Testing Spring Batch",
+      "lessons": [
+        {
+          "id": "14.1",
+          "title": "JobLauncherTestUtils",
+          "description": "end-to-end job tests using JobLauncherTestUtils: launchJob(JobParameters) runs the full job; launchStep(stepName, JobParameters) runs a single step in isolation; asserting on JobExecution status, StepExecution read/write counts, and output data; the test needs a real embedded database (H2) for the JobRepository; combining with @SpringBatchTest for automatic bean wiring."
+        },
+        {
+          "id": "14.2",
+          "title": "@SpringBatchTest and StepScope Test Listeners",
+          "description": "@SpringBatchTest auto-wires JobLauncherTestUtils, JobRepositoryTestUtils, and StepScopeTestExecutionListener into the test context; StepScopeTestExecutionListener allows testing @StepScoped beans by populating the StepExecution from the test method's @BeforeEach; JobRepositoryTestUtils.removeJobExecutions() for cleaning test data between runs; how to test a @StepScoped reader by setting stepExecutionContext values manually in the test setup.",
+          "crossRefs": ["11.3"]
+        },
+        {
+          "id": "14.3",
+          "title": "Unit-Testing Readers, Processors, and Writers in Isolation",
+          "description": "readers, processors, and writers are plain Java objects — unit-test them without loading a Spring context; testing FlatFileItemReader against a ClassPathResource; testing a custom processor's transformation logic directly; testing a JdbcBatchItemWriter with an in-memory H2 datasource and JdbcTemplate assertions; the advantage of stateless processors: they require no mock state, just call process(item) and assert the result."
+        },
+        {
+          "id": "14.4",
+          "title": "MetaDataInstanceFactory",
+          "description": "constructing fake StepExecution and JobExecution objects for tests without a real JobRepository; MetaDataInstanceFactory.createStepExecution() creates a StepExecution with a default ExecutionContext; MetaDataInstanceFactory.createJobExecution(name, id, params) for job-level context; use cases: testing ItemStream.open() with a pre-populated ExecutionContext, testing a listener that reads StepExecution fields, testing partition-aware beans with specific ExecutionContext values."
+        },
+        {
+          "id": "14.5",
+          "title": "Testing Partitioned and Remote-Partitioned Jobs",
+          "description": "unit-test the Partitioner's split logic as a pure function: call partition(gridSize) and assert the returned Map contains the expected ExecutionContext entries (minId, maxId ranges); integration-test a single slave step via StepScopeTestExecutionListener by manually setting the ExecutionContext values that @StepScoped SpEL expressions would normally inject; for remote partitioning: use an embedded broker (embedded ActiveMQ Artemis via @EmbeddedBroker) before integrating with real Kafka, to isolate Batch logic from broker configuration.",
+          "crossRefs": ["11.3", "11.9", "14.2"]
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Observability",
+      "lessons": [
+        {
+          "id": "15.1",
+          "title": "Micrometer Batch Metrics",
+          "description": "Spring Batch 5.x auto-registers Micrometer metrics when BatchMetrics is on the classpath: spring.batch.job.duration (Timer), spring.batch.step.duration (Timer), spring.batch.step.item.read (Counter), spring.batch.step.item.write (Counter), spring.batch.step.item.skip (Counter); tags include job name, step name, and status; accessing metrics in tests via MeterRegistry; metrics auto-include partition-level breakdowns when @EnableBatchMetrics is active."
+        },
+        {
+          "id": "15.2",
+          "title": "Batch Tracing: Spans Per Job and Step",
+          "description": "Spring Batch 5.x creates Micrometer Observation spans for each job and step execution when spring-boot-starter-actuator is present; in Architecture 3 (remote partitioning), the master step's span does not automatically propagate across the broker hop to the slave JVM — the slave starts its own root span; correlating master and partition spans requires passing the W3C traceparent header through the ExecutionContext or a custom message header; this is genuinely harder than same-JVM tracing.",
+          "crossRefs": ["11.9"]
+        },
+        {
+          "id": "15.3",
+          "title": "Structured Logging With Correlation IDs",
+          "description": "adding the JobExecution ID and job name to the MDC (Mapped Diagnostic Context) at job start so all log lines for that job execution include a correlation ID; implementing this in a JobExecutionListener.beforeJob(); for long-running partitioned jobs, also add the partitionId to the MDC in each slave's StepExecutionListener.beforeStep(); log aggregation in Loki or Elasticsearch becomes trivial when every line is tagged with jobExecutionId.",
+          "crossRefs": ["8.1"]
+        },
+        {
+          "id": "15.4",
+          "title": "JFR Integration",
+          "description": "Spring Batch 6.0 added Java Flight Recorder (JFR) event publishing for job/step lifecycle events; JFR events capture timing, item counts, and error details with sub-millisecond precision and near-zero overhead; use JFR when Micrometer metrics are insufficient for diagnosing transient performance regressions (e.g., why did chunk 5000 of 10000 take 3x longer?); enable with -XX:+FlightRecorder -XX:StartFlightRecording on the JVM; view recordings in JDK Mission Control."
+        },
+        {
+          "id": "15.5",
+          "title": "Exporting Batch Metrics to Prometheus",
+          "description": "wiring Micrometer's PrometheusMeterRegistry to the batch metrics from lesson 15.1; adding spring-boot-starter-actuator and micrometer-registry-prometheus; exposing /actuator/prometheus endpoint; designing a useful Grafana dashboard: track job/step duration trend over time (P95, P99), throughput (items-written/second), skip rate (spikes signal data quality issues), error rate; alerting on duration exceeding the batch window SLA.",
+          "crossRefs": ["15.1"]
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Capstone: Production-Grade Financial Reconciliation Pipeline",
+      "lessons": [
+        {
+          "id": "16.1",
+          "title": "The Reconciliation Pattern End-to-End",
+          "description": "assembling the complete pipeline from the running domain: read SettlementRecord from a flat file (FlatFileItemReader), validate and enrich with live Trade data (processor with DB lookup), aggregate match/mismatch result (ReconciliationResult processor), write results to the reconciliation_result table (JdbcBatchItemWriter); how the pieces from sections 5, 6, 7 compose; the job's step sequence: archive-previous-day (Tasklet) -> load-settlement-records (chunk) -> publish-results (chunk).",
+          "crossRefs": ["4.3", "5.1", "6.5", "7.1"]
+        },
+        {
+          "id": "16.2",
+          "title": "Handling Partial Failures Without Corrupting Totals",
+          "description": "a skip-vs-fail-fast framework for financial correctness: validation errors on individual records (missing instrument, unparseable amount) are safe to skip-and-log up to a threshold; a systemic error (DB connection failure, all records from a counterparty failing) must halt the job rather than silently accumulating skips; implementing a SkipPolicy that distinguishes item-level vs. systemic failures; the compliance requirement: every skipped record must be in the skip_audit table before the job completes.",
+          "crossRefs": ["9.1", "8.4"]
+        },
+        {
+          "id": "16.3",
+          "title": "Idempotent Reruns for End-of-Day Settlement",
+          "description": "the reconciliation job may need to rerun for the same business date (late-arriving records, data corrections); designing the write step so rerunning does not double-count: INSERT INTO reconciliation_result (...) ON CONFLICT (trade_id, settlement_date) DO UPDATE SET matched = EXCLUDED.matched, variance = EXCLUDED.variance; ensuring the job creates a fresh JobInstance for each rerun via a business-date-based incrementer while still being able to restart a failed run of the same business date.",
+          "crossRefs": ["9.3", "2.4", "10.3"]
+        },
+        {
+          "id": "16.4",
+          "title": "ExecutionContext Design for Safe Mid-File Resume",
+          "description": "designing the ExecutionContext state for a crash mid-settlement-file: FlatFileItemReader auto-saves the current line number; the enrichment processor caches exchange rates in a Map loaded in beforeChunk — this cache must be rebuilt on restart (it is transient, not persisted); what must be explicitly persisted: any counter or accumulator that drives downstream decisions (e.g., a running total that determines whether to invoke a late-fee calculation); keeping ExecutionContext entries small and serializable.",
+          "crossRefs": ["2.3", "9.4", "8.2"]
+        },
+        {
+          "id": "16.5",
+          "title": "Applying the Architecture Decision Framework",
+          "description": "walking through the scaling decision for the reconciliation pipeline: given 500K records/day at T+2 hours SLA — does single-threaded fit? (yes, typically); what volume triggers the upgrade to local partitioning? (typically >5M records or <30-minute window); when does remote partitioning make sense? (multiple data centers, broker infra already operated by the team); the full decision checklist: record volume, batch window, existing infra, team size, restart complexity tolerance.",
+          "crossRefs": ["11.20", "11.1", "11.4", "11.9"]
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Migration Path and Hands-On Labs",
+      "lessons": [
+        {
+          "id": "17.1",
+          "title": "Lab 1: Build Architecture 1 End-to-End",
+          "description": "build the full single-threaded reconciliation job with a real Postgres JobRepository (not H2) so BATCH_STEP_EXECUTION rows are actually inspectable with psql; configure the datasource, run spring.batch.jdbc.initialize-schema=always, submit a job run, then query SELECT * FROM batch_step_execution to see read/write counts; verify restart: kill the process mid-run, restart, confirm it resumes at the correct line."
+        },
+        {
+          "id": "17.2",
+          "title": "Lab 2: Refactor Into Architecture 2 (Local Partitioning)",
+          "description": "add @StepScope to the FlatFileItemReader bean; implement a RangePartitioner that divides the settlement file by line range; wire TaskExecutorPartitionHandler with a ThreadPoolTaskExecutor (4 threads); deliberately create a skewed range partitioner first (assign 80% of records to one partition) to observe the straggler problem in the BATCH_STEP_EXECUTION rows; fix the skew and observe the improvement; verify thread safety of the processor.",
+          "crossRefs": ["11.3", "11.4", "11.5"]
+        },
+        {
+          "id": "17.3",
+          "title": "Lab 3: Refactor Into Architecture 3 (Remote Partitioning)",
+          "description": "configure embedded ActiveMQ Artemis first (fast iteration, no external dependency); wire MessageChannelPartitionHandler, work queue, reply queue; start two worker instances in separate Spring profiles; observe partition messages in the ActiveMQ console; then swap to Kafka: create a dedicated reply topic, configure KafkaTemplate for the work channel, observe the JMS-vs-Kafka difference (reply-topic management, concurrency ceiling) from lesson 11.11 firsthand.",
+          "crossRefs": ["11.9", "11.11"]
+        },
+        {
+          "id": "17.4",
+          "title": "Lab 4: Kill a Slave Mid-Job",
+          "description": "with Architecture 3 running, kill a slave JVM mid-partition (SIGKILL or stopping the container); observe the BATCH_STEP_EXECUTION row for the killed partition stuck in STARTED status; wait for the master's poll timeout to confirm it is hanging; implement the timeout/health-check strategy from lesson 11.15 to detect and FAIL the stuck partition; restart the job and confirm only the failed partition re-runs.",
+          "crossRefs": ["11.15", "11.9"]
+        },
+        {
+          "id": "17.5",
+          "title": "Version Awareness: 5.x vs. 6.0 Migration Checklist",
+          "description": "concrete migration checklist for teams upgrading from Spring Batch 5.x to 6.0: (1) JobOperator unification — replace JobLauncher + JobExplorer + JobOperator with the unified JobOperator; (2) @EnableBatchProcessing(modular = true) is deprecated and removed — migrate to explicit configuration; (3) all deprecated APIs removed — scan with ArchUnit or IDE inspection; (4) Graceful Shutdown API changes; (5) LocalChunking API stabilized; (6) JFR integration enabled by default; presented as a checklist with before/after code snippets for each item.",
+          "crossRefs": ["13.1", "13.4", "11.19"]
+        }
+      ]
+    }
+  ]
+}

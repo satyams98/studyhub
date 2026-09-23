@@ -89,6 +89,25 @@ export default function LessonPage() {
           {lesson.summary?.map((p, i) => <p key={i} dangerouslySetInnerHTML={{ __html: p }} />)}
         </div>
 
+        {lesson.diagram && (
+          <div className="diagram-block" dangerouslySetInnerHTML={{ __html: lesson.diagram }} />
+        )}
+
+        {lesson.topics?.map((topic, i) => (
+          <div key={i} className="topic-section">
+            <h3 className="topic-title">{topic.title}</h3>
+            <div className="prose">
+              {topic.body?.map((p, j) => <p key={j} dangerouslySetInnerHTML={{ __html: p }} />)}
+            </div>
+            {topic.diagram && (
+              <div className="diagram-block" dangerouslySetInnerHTML={{ __html: topic.diagram }} />
+            )}
+            {topic.code && (
+              <CodeBlock code={topic.code} label={topic.codeLabel || 'java'} />
+            )}
+          </div>
+        ))}
+
         {lesson.keyPoints?.length > 0 && (
           <>
             <h2>Key Takeaways</h2>
@@ -108,7 +127,7 @@ export default function LessonPage() {
         {lesson.note && <Callout label={lesson.note.label} text={lesson.note.text} tone={lesson.note.tone} />}
 
         {lesson.quiz && (
-          <Quiz question={lesson.quiz.question} options={lesson.quiz.options} explanation={lesson.quiz.explanation} />
+          <Quiz key={lesson.id} question={lesson.quiz.question} options={lesson.quiz.options} explanation={lesson.quiz.explanation} />
         )}
       </div>
 

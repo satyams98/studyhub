@@ -37,6 +37,9 @@ load_dotenv(_PROJECT_ROOT / '.env')
 
 MODEL = os.environ.get("MODEL", "gemini-2.5-flash")
 BASE_URL = os.environ.get("BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "minimax-m3:cloud")
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_BASE_URL = f"{OLLAMA_HOST}/v1"  # Ollama's OpenAI-compatible endpoint
 MAX_TOKENS = 16384
 TEMPERATURE = 0.3  # Low for factual accuracy — transcript provides all content
 RETRY_DELAY = 5  # base seconds between retries (exponential backoff)
@@ -205,9 +208,53 @@ def build_section_context(section_title: str, all_lessons: list, current_num: in
     return "\n".join(lines)
 
 
+def _sanitize_llm_json(text: str) -> str:
+    """Clean up LLM-generated JSON text so it can be parsed by json.loads().
+
+    Handles:
+    - Markdown code fences around JSON
+    - Literal newlines / tabs inside JSON string values
+    - Invalid backslash escapes (e.g. \\S, \\p) that are not legal JSON
+    """
+    text = text.strip()
+
+    # Strip markdown fences
+    if text.startswith("```"):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+
+    # Fix control characters and invalid escapes inside JSON string literals
+    def _fix_json_string(m):
+        s = m.group(0)
+        inner = s[1:-1]
+        # Replace literal control characters
+        inner = inner.replace('\r\n', '\\n')
+        inner = inner.replace('\r', '\\n')
+        inner = inner.replace('\n', '\\n')
+        inner = inner.replace('\t', '\\t')
+        # Fix invalid backslash escapes: keep valid ones, double-escape the rest.
+        # Valid JSON escapes: \\ \" \/ \b \f \n \r \t \uXXXX
+        inner = re.sub(
+            r'\\(?!["\\/bfnrtu])',
+            r'\\\\',
+            inner,
+        )
+        return s[0] + inner + s[-1]
+
+    text = re.sub(
+        r'"(?:[^"\\]|\\.)*"',
+        _fix_json_string,
+        text,
+        flags=re.DOTALL,
+    )
+
+    return text
+
+
 def call_api(client: OpenAI, transcript: str, lesson_id: str, title: str, duration: int,
-             section_context: str = "") -> dict:
-    """Call the NVIDIA API to generate lesson content from a transcript."""
+             section_context: str = "", model_override: str = None) -> dict:
+    """Call the API (NVIDIA, Gemini, or Ollama via OpenAI wrapper) to generate lesson content."""
+    model_to_use = model_override or MODEL
     user_prompt = f"""{section_context}
 
 Lesson ID: {lesson_id}
@@ -225,7 +272,7 @@ Transcript:
         try:
             response_text = ""
             completion = client.chat.completions.create(
-                model=MODEL,
+                model=model_to_use,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
@@ -246,34 +293,8 @@ Transcript:
                 if getattr(delta, "content", None) is not None:
                     response_text += delta.content
 
-            # Parse the JSON response
-            # Strip markdown fences if present
-            response_text = response_text.strip()
-            if response_text.startswith("```"):
-                response_text = re.sub(r'^```(?:json)?\s*', '', response_text)
-                response_text = re.sub(r'\s*```$', '', response_text)
-
-            # Fix invalid control characters inside JSON string values.
-            # LLMs often emit literal newlines/tabs inside strings (especially
-            # in the "code" field) which is invalid JSON. Escape them properly.
-            def _escape_control_chars(m):
-                """Replace unescaped control chars inside a JSON string literal."""
-                s = m.group(0)
-                # Process the content between the outer quotes
-                inner = s[1:-1]
-                inner = inner.replace('\r\n', '\\n')
-                inner = inner.replace('\r', '\\n')
-                inner = inner.replace('\n', '\\n')
-                inner = inner.replace('\t', '\\t')
-                return s[0] + inner + s[-1]
-
-            # Match JSON string literals (handles escaped quotes within)
-            response_text = re.sub(
-                r'"(?:[^"\\]|\\.)*"',
-                _escape_control_chars,
-                response_text,
-                flags=re.DOTALL,
-            )
+            # Sanitize and parse JSON response
+            response_text = _sanitize_llm_json(response_text)
 
             result = json.loads(response_text)
             return result
@@ -353,7 +374,11 @@ def generate_section_js(lessons: list) -> str:
 
         # code
         if lesson.get('code'):
-            code_escaped = lesson['code'].replace('`', '\\`').replace('${', '\\${')
+            code_val = lesson['code']
+            # Ollama models may return code as a dict/list instead of a string — coerce it
+            if not isinstance(code_val, str):
+                code_val = json.dumps(code_val, indent=2) if isinstance(code_val, (dict, list)) else str(code_val)
+            code_escaped = code_val.replace('`', '\\`').replace('${', '\\${')
             parts.append(f"    code: `{code_escaped}`,")
             if lesson.get('codeLabel'):
                 parts.append(f"    codeLabel: '{escape_js_string(lesson['codeLabel'])}',")
@@ -421,6 +446,41 @@ def generate_glossary_js(glossary_terms: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _load_lessons_from_existing_js(lessons_dir: Path, exclude_sections: set) -> dict:
+    """Read already-written sectionXX.js files and extract lesson text for glossary generation.
+    Only loads sections not in exclude_sections (those were just generated in this run)."""
+    extra = {}
+    for f in sorted(lessons_dir.glob("section*.js")):
+        m = re.match(r'section(\d+)\.js', f.name)
+        if not m:
+            continue
+        sec_n = int(m.group(1))
+        if sec_n in exclude_sections:
+            continue
+        try:
+            raw = f.read_text(encoding='utf-8')
+            ids = re.findall(r"id:\s*'(\d+\.\d+)'", raw)
+            titles_raw = re.findall(r"title:\s*'((?:[^'\\]|\\.)*)'", raw)
+            titles = [t.replace("\\'", "'") for t in titles_raw]
+            # Long strings (>40 chars) are summaries/keyPoints — skip short labels/ids
+            long_strings = re.findall(r"'((?:[^'\\]|\\.){40,})'", raw)
+            lessons_out = []
+            per_lesson = max(1, len(long_strings) // max(len(ids), 1))
+            for i, lid in enumerate(ids):
+                chunk = long_strings[i * per_lesson: (i + 1) * per_lesson]
+                lessons_out.append({
+                    "id": lid,
+                    "title": titles[i] if i < len(titles) else lid,
+                    "summary": [s.replace("\\n", " ").replace("\\'", "'") for s in chunk],
+                    "keyPoints": [],
+                })
+            if lessons_out:
+                extra[sec_n] = lessons_out
+        except Exception as e:
+            print(f"  [WARN] Could not load existing section {sec_n} for glossary: {e}")
+    return extra
+
+
 def _parse_existing_sections_meta(sections_file: Path) -> list:
     """Parse an existing {slug}-sections.js file to extract section metadata entries."""
     content = sections_file.read_text(encoding='utf-8')
@@ -456,7 +516,7 @@ Rules:
 Return ONLY a valid JSON array. No markdown fences, no extra text."""
 
 
-def _generate_glossary_from_lessons(client: OpenAI, all_generated_lessons: dict, course_title: str) -> list:
+def _generate_glossary_from_lessons(client: OpenAI, all_generated_lessons: dict, course_title: str, model: str = None) -> list:
     """Call the LLM to extract glossary terms from all generated lesson content."""
     # Collect summaries and key points as context
     context_parts = [f"Course: {course_title}\n"]
@@ -478,14 +538,13 @@ def _generate_glossary_from_lessons(client: OpenAI, all_generated_lessons: dict,
     try:
         response_text = ""
         completion = client.chat.completions.create(
-            model=MODEL,
+            model=model or MODEL,
             messages=[
                 {"role": "system", "content": GLOSSARY_PROMPT},
                 {"role": "user", "content": combined_context},
             ],
             temperature=0.2,
             max_tokens=MAX_TOKENS,
-            response_format={"type": "json_object"},
             stream=True,
         )
         for chunk in completion:
@@ -569,12 +628,15 @@ def main():
     parser.add_argument("--sections", default=None, help="Comma-separated section numbers to process (e.g., '2,3,4'). Default: all")
     parser.add_argument("--workers", type=int, default=3, help="Number of parallel API calls (default: 3)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and show plan without calling the API")
+    parser.add_argument("--ollama", action="store_true", help="Use local Ollama server instead of NVIDIA/OpenAI API")
+    parser.add_argument("--force", action="store_true", help="Regenerate sections even if output files already exist")
+    parser.add_argument("--glossary-only", action="store_true", help="Skip lesson generation; regenerate glossary from all existing section files")
 
     args = parser.parse_args()
 
-    # Validate API key
+    # Validate API key (not needed for ollama)
     api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("NVIDIA_API_KEY")
-    if not api_key and not args.dry_run:
+    if not api_key and not args.dry_run and not args.ollama:
         print("ERROR: No API key found. Set API_KEY, GEMINI_API_KEY, or NVIDIA_API_KEY in .env")
         sys.exit(1)
 
@@ -625,6 +687,10 @@ def main():
     course_title = args.course_title or "Spring WebFlux Course"
 
     slug = args.course_slug
+    use_ollama = args.ollama
+    active_model = OLLAMA_MODEL if use_ollama else MODEL
+    backend_label = "Ollama (local)" if use_ollama else f"API ({BASE_URL})"
+
     lessons_dir = output_dir / f"{slug}-lessons"
 
     print(f"\n{'=' * 60}")
@@ -632,7 +698,8 @@ def main():
     print(f"{'=' * 60}")
     print(f"  Course slug:   {slug}")
     print(f"  Course title:  {course_title}")
-    print(f"  Model:         {MODEL}")
+    print(f"  Backend:       {backend_label}")
+    print(f"  Model:         {active_model}")
     print(f"  Input folder:  {transcript_folder}")
     print(f"  Output dir:    {output_dir}")
     print(f"  Sections:      {sorted(sections_info.keys())}")
@@ -656,11 +723,31 @@ def main():
     # Initialize API client and rate limiter
     global _rate_limiter
     _rate_limiter = RateLimiter(RPM_LIMIT)
-    client = OpenAI(base_url=BASE_URL, api_key=api_key)
+    if use_ollama:
+        # Ollama exposes an OpenAI-compatible API at /v1
+        client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+        print(f"[INFO] Using Ollama backend at {OLLAMA_HOST} with model: {OLLAMA_MODEL}")
+    else:
+        client = OpenAI(base_url=BASE_URL, api_key=api_key)
     print(f"[INFO] Rate limiter: {RPM_LIMIT} requests/min")
 
     # Create output directories
     lessons_dir.mkdir(parents=True, exist_ok=True)
+
+    # ─── Glossary-only mode ────────────────────────────────────────────────
+    if args.glossary_only:
+        all_sections = _load_lessons_from_existing_js(lessons_dir, exclude_sections=set())
+        if not all_sections:
+            print("[ERROR] No existing section files found in", lessons_dir)
+            sys.exit(1)
+        print(f"[INFO] Generating glossary from {len(all_sections)} existing section(s)...")
+        active_model_name = OLLAMA_MODEL if use_ollama else MODEL
+        glossary_terms = _generate_glossary_from_lessons(client, all_sections, course_title, model=active_model_name)
+        glossary_js = generate_glossary_js(glossary_terms)
+        glossary_file = output_dir / f"{slug}-glossary.js"
+        glossary_file.write_text(glossary_js, encoding='utf-8')
+        print(f"✓ Written: {glossary_file} ({len(glossary_terms)} terms)")
+        return
 
     all_generated_lessons = {}  # {section_num: [lesson_objects]}
 
@@ -699,17 +786,31 @@ def main():
         # Call API with section context for continuity
         print(f"    [{lesson_id}] Generating...", flush=True)
         _rate_limiter.wait()
-        result = call_api(client, transcript_text, lesson_id, title, duration, section_context)
+        active_model_name = OLLAMA_MODEL if use_ollama else MODEL
+        result = call_api(client, transcript_text, lesson_id, title, duration, section_context,
+                          model_override=active_model_name if use_ollama else None)
         print(f"    [{lesson_id}] ✓ Done", flush=True)
 
-        # Merge with metadata
+        # Merge with metadata — normalize summary/keyPoints to list of strings
+        raw_summary = result.get("summary", [])
+        if isinstance(raw_summary, str):
+            raw_summary = [raw_summary]
+        elif not isinstance(raw_summary, list):
+            raw_summary = [str(raw_summary)]
+
+        raw_key_points = result.get("keyPoints", [])
+        if isinstance(raw_key_points, str):
+            raw_key_points = [raw_key_points]
+        elif not isinstance(raw_key_points, list):
+            raw_key_points = [str(raw_key_points)]
+
         lesson_obj = {
             "id": lesson_id,
             "title": result.get("title", title),
             "duration": result.get("duration", f"{duration} min"),
             "kind": result.get("kind", classify_kind(title) or "concept"),
-            "summary": result.get("summary", []),
-            "keyPoints": result.get("keyPoints", []),
+            "summary": raw_summary,
+            "keyPoints": raw_key_points,
         }
         if result.get("code"):
             lesson_obj["code"] = result["code"]
@@ -723,8 +824,21 @@ def main():
         return lesson_obj
 
     # Process sections one at a time, lessons in parallel within each section
+    completed_sections = 0
+    failed_section = None
     for sec_num in sorted(sections_info.keys()):
         sec = sections_info[sec_num]
+
+        # ─── Resume support: skip sections that already have output files ───
+        section_file = lessons_dir / f"section{sec_num:02d}.js"
+        if section_file.exists() and not args.force:
+            print(f"\n{'─' * 50}")
+            print(f"  Section {sec_num}: {sec['title']} — SKIPPED (already exists)")
+            print(f"  Use --force to regenerate.")
+            print(f"{'─' * 50}")
+            completed_sections += 1
+            continue
+
         print(f"\n{'─' * 50}")
         print(f"  Section {sec_num}: {sec['title']} ({len(sec['lessons'])} lessons)")
         print(f"{'─' * 50}")
@@ -734,41 +848,53 @@ def main():
 
         # Submit all lessons in this section to the thread pool
         results_map = {}  # {lesson_num: lesson_obj}
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            future_to_lesson = {}
-            for lesson_info in sec['lessons']:
-                # Each lesson gets context with itself marked as current (►)
-                ctx = build_section_context(sec['title'], sec['lessons'], lesson_info['num'])
-                future = executor.submit(process_lesson, lesson_info, sec_num, ctx)
-                future_to_lesson[future] = lesson_info
+        section_aborted = False
+        try:
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                future_to_lesson = {}
+                for lesson_info in sec['lessons']:
+                    # Each lesson gets context with itself marked as current (►)
+                    ctx = build_section_context(sec['title'], sec['lessons'], lesson_info['num'])
+                    future = executor.submit(process_lesson, lesson_info, sec_num, ctx)
+                    future_to_lesson[future] = lesson_info
 
-            for future in as_completed(future_to_lesson):
-                lesson_info = future_to_lesson[future]
-                try:
-                    lesson_obj = future.result()
-                    results_map[lesson_info['num']] = lesson_obj
-                except Exception as e:
-                    lesson_id = f"{sec_num}.{lesson_info['num']}"
-                    print(f"    [{lesson_id}] ERROR: {e}")
-                    results_map[lesson_info['num']] = {
-                        "id": lesson_id,
-                        "title": lesson_info['title'],
-                        "duration": f"{lesson_info['duration']} min",
-                        "kind": classify_kind(lesson_info['title']) or "concept",
-                        "summary": [f"[Generation failed: {e}]"],
-                        "keyPoints": [],
-                    }
+                for future in as_completed(future_to_lesson):
+                    lesson_info = future_to_lesson[future]
+                    try:
+                        lesson_obj = future.result()
+                        results_map[lesson_info['num']] = lesson_obj
+                    except Exception as e:
+                        lesson_id = f"{sec_num}.{lesson_info['num']}"
+                        print(f"    [{lesson_id}] ERROR: {e}")
+                        results_map[lesson_info['num']] = {
+                            "id": lesson_id,
+                            "title": lesson_info['title'],
+                            "duration": f"{lesson_info['duration']} min",
+                            "kind": classify_kind(lesson_info['title']) or "concept",
+                            "summary": [f"[Generation failed: {e}]"],
+                            "keyPoints": [],
+                        }
+        except (KeyboardInterrupt, Exception) as e:
+            print(f"\n  [ABORT] Section {sec_num} interrupted: {e}")
+            print(f"  [INFO] Previously completed sections are preserved.")
+            failed_section = sec_num
+            section_aborted = True
+
+        if section_aborted:
+            break
 
         # Reassemble in correct order
         section_lessons = [results_map[li['num']] for li in sec['lessons'] if li['num'] in results_map]
 
         all_generated_lessons[sec_num] = section_lessons
 
-        # Write section file
+        # Write section file immediately so progress is never lost
         section_js = generate_section_js(section_lessons)
-        section_file = lessons_dir / f"section{sec_num:02d}.js"
         section_file.write_text(section_js, encoding='utf-8')
+        completed_sections += 1
         print(f"\n  ✓ Written: {section_file}")
+
+    # ─── Post-processing (always runs, even after partial completion) ──────
 
     # Generate sections metadata file (merge with existing when running partial sections)
     sections_meta = []
@@ -781,37 +907,51 @@ def main():
 
     sections_file = output_dir / f"{slug}-sections.js"
 
-    # If running a subset of sections, merge new entries into existing file
-    if args.sections and sections_file.exists():
+    # Always merge with existing to preserve earlier runs
+    if sections_file.exists():
         existing_meta = _parse_existing_sections_meta(sections_file)
-        # Update existing entries with newly generated ones (by id)
         merged = {m['id']: m for m in existing_meta}
         for m in sections_meta:
             merged[m['id']] = m
         sections_meta = [merged[k] for k in sorted(merged.keys())]
-        print(f"  [INFO] Merged {len(sections_meta)} sections (updated {len(sections_info)} in existing file)")
 
     sections_js = generate_sections_js(sections_meta)
     sections_file.write_text(sections_js, encoding='utf-8')
     print(f"\n✓ Written: {sections_file}")
 
-    # Generate glossary from lesson content via LLM
-    print(f"\n[INFO] Generating glossary from lesson content...")
-    glossary_terms = _generate_glossary_from_lessons(client, all_generated_lessons, course_title)
-    glossary_js = generate_glossary_js(glossary_terms)
-    glossary_file = output_dir / f"{slug}-glossary.js"
-    glossary_file.write_text(glossary_js, encoding='utf-8')
-    print(f"✓ Written: {glossary_file} ({len(glossary_terms)} terms)")
+    # Generate glossary from lesson content via LLM (skip if no new lessons were generated)
+    if all_generated_lessons:
+        # Merge with content from already-existing sections not processed in this run,
+        # so the glossary always covers the full course regardless of which sections were requested.
+        existing_lessons = _load_lessons_from_existing_js(lessons_dir, set(all_generated_lessons.keys()))
+        all_content_for_glossary = {**existing_lessons, **all_generated_lessons}
+        section_count = len(all_content_for_glossary)
+        print(f"\n[INFO] Generating glossary from {section_count} section(s) ({len(existing_lessons)} existing + {len(all_generated_lessons)} new)...")
+        active_model_name = OLLAMA_MODEL if use_ollama else MODEL
+        glossary_terms = _generate_glossary_from_lessons(client, all_content_for_glossary, course_title, model=active_model_name)
+        glossary_js = generate_glossary_js(glossary_terms)
+        glossary_file = output_dir / f"{slug}-glossary.js"
+        glossary_file.write_text(glossary_js, encoding='utf-8')
+        print(f"✓ Written: {glossary_file} ({len(glossary_terms)} terms)")
+    else:
+        print(f"\n[INFO] No new lessons generated — skipping glossary update.")
 
-    # Print registry snippet
+    # Print registry snippet (count all section files on disk, not just this run)
+    total_sections_on_disk = len(list(lessons_dir.glob("section*.js")))
     print(f"\n{'=' * 60}")
-    print(f"  REGISTRATION SNIPPET")
-    print(f"  Add the following to src/data/courseRegistry.js:")
+    print(f"  REGISTRATION SNIPPET (for reference — runs automatically unless -SkipRegister)")
     print(f"{'=' * 60}\n")
-    print(generate_registry_snippet(slug, course_title, len(sections_info)))
+    print(generate_registry_snippet(slug, course_title, total_sections_on_disk))
 
+    # Summary
     print(f"\n{'=' * 60}")
-    print(f"  DONE! Generated {total_lessons} lessons across {len(sections_info)} sections.")
+    if failed_section:
+        remaining = [s for s in sorted(sections_info.keys()) if s >= failed_section]
+        print(f"  PARTIAL COMPLETION: {completed_sections}/{len(sections_info)} sections done.")
+        print(f"  Remaining: {remaining}")
+        print(f"  Re-run the same command to resume (completed sections are skipped).")
+    else:
+        print(f"  DONE! Generated {total_lessons} lessons across {len(sections_info)} sections.")
     print(f"{'=' * 60}\n")
 
 

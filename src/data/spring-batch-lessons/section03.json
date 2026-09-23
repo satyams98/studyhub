@@ -1,0 +1,244 @@
+[
+  {
+    "id": "3.1",
+    "title": "JobRepository Purpose and Schema",
+    "duration": "10 min",
+    "kind": "concept",
+    "summary": [
+      "The <code>JobRepository</code> is not an optional audit log — it is the <strong>central nervous system</strong> of Spring Batch. Every restart, every skip, every commit boundary, and every flow decision depends on the data stored in its tables. Without the <code>JobRepository</code>, Spring Batch is just a fancy <code>for</code> loop. With it, the framework becomes a stateful, recoverable, observable execution engine. Understanding what the tables store and how they relate to the domain model (Section 2) is essential for debugging production failures, tuning performance, and designing restart-safe jobs.",
+      "The schema consists of six core tables. <code>BATCH_JOB_INSTANCE</code> stores the logical identity of a job run: the job name plus the <code>JobParameters</code> that uniquely identify it. Identical parameters for the same job name always resolve to the same <code>JOB_INSTANCE_ID</code>. This is why rerunning with identical parameters throws <code>JobInstanceAlreadyCompleteException</code> (see 2.1) — the framework looks up this table and finds the instance already exists with a completed execution. <code>BATCH_JOB_EXECUTION</code> stores each physical attempt to run a <code>JobInstance</code>: start time, end time, status (<code>STARTED</code>, <code>COMPLETED</code>, <code>FAILED</code>), and exit code. A failed job that is restarted creates a <em>new</em> row here, linked to the <em>same</em> instance. <code>BATCH_JOB_PARAMS</code> stores the key-value pairs of <code>JobParameters</code> as typed columns (<code>STRING_VAL</code>, <code>LONG_VAL</code>, <code>DATE_VAL</code>, etc.) linked to the instance.",
+      "<code>BATCH_STEP_EXECUTION</code> is where the operational action lives. Every step in every job execution gets a row here, tracking <code>read_count</code>, <code>write_count</code>, <code>commit_count</code>, <code>rollback_count</code>, <code>skip_count</code>, and timing. When you partition a step (Section 11), each partition produces its own <code>STEP_EXECUTION_ID</code> row, all linked to the same parent <code>JOB_EXECUTION_ID</code>. This is why a single partitioned job can write 50 or 100 rows to this table. The <code>STEP_EXECUTION_CONTEXT</code> and <code>JOB_EXECUTION_CONTEXT</code> tables store the serialized <code>ExecutionContext</code> objects (see 2.3) as BLOBs or CLOBs. These are the restart bookmarks: the line number in a CSV file, the last-read primary key in a database cursor, the cumulative mismatch count across steps. When a job restarts, the framework deserializes these contexts and hands them back to the readers and listeners so execution resumes exactly where it left off.",
+      "The schema is designed for <strong>append-only, immutable history</strong>. Rows are never updated to change a past status; instead, new executions are created. This makes the <code>JobRepository</code> a complete audit trail. In financial reconciliation, regulators may ask for proof that a job ran on a specific date, how many records were processed, and whether any were skipped. The <code>BATCH_STEP_EXECUTION</code> table answers all of these questions without custom logging. However, this append-only design means the tables grow indefinitely. Production deployments must implement an archiving or purging strategy (typically via Spring Batch's <code>JobRepository</code> metadata cleanup APIs or direct SQL) to prevent the tables from consuming unbounded storage. A common pattern is to purge executions older than 90 days, retaining only the most recent successful execution per <code>JobInstance</code> for restart purposes."
+    ],
+    "keyPoints": [
+      "The <code>JobRepository</code> is the stateful execution engine of Spring Batch — not just an audit log.",
+      "<code>BATCH_JOB_INSTANCE</code> stores the logical identity (job name + parameters); identical parameters always resolve to the same instance.",
+      "<code>BATCH_JOB_EXECUTION</code> stores each physical attempt; restarts create new rows linked to the same instance.",
+      "<code>BATCH_STEP_EXECUTION</code> tracks per-step metrics (read/write/commit/skip counts) and timing.",
+      "<code>JOB_EXECUTION_CONTEXT</code> and <code>STEP_EXECUTION_CONTEXT</code> store serialized restart bookmarks.",
+      "The schema is append-only; production deployments need archiving/purging strategies to prevent unbounded growth."
+    ],
+    "code": "package com.example.reconciliation.batch;\n\nimport org.springframework.batch.core.JobExecution;\nimport org.springframework.batch.core.JobInstance;\nimport org.springframework.batch.core.StepExecution;\nimport org.springframework.batch.core.explore.JobExplorer;\nimport org.springframework.batch.core.repository.JobRepository;\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Configuration;\n\nimport java.util.List;\n\n@Configuration\npublic class JobRepositoryInspectionConfig {\n\n    // JobExplorer provides read-only access to the JobRepository tables.\n    // Use it for dashboards, operational queries, and debugging.\n\n    @Bean\n    public JobRepositoryInspector jobRepositoryInspector(JobExplorer jobExplorer) {\n        return new JobRepositoryInspector(jobExplorer);\n    }\n\n    public static class JobRepositoryInspector {\n        private final JobExplorer jobExplorer;\n\n        public JobRepositoryInspector(JobExplorer jobExplorer) {\n            this.jobExplorer = jobExplorer;\n        }\n\n        public void inspectJobHistory(String jobName) {\n            // BATCH_JOB_INSTANCE: find all instances of this job name\n            List<JobInstance> instances = jobExplorer.findJobInstancesByJobName(jobName, 0, 10);\n\n            for (JobInstance instance : instances) {\n                System.out.printf(\"Instance ID: %d, Parameters: %s%n\",\n                        instance.getId(), instance.getJobParameters());\n\n                // BATCH_JOB_EXECUTION: all attempts for this instance\n                List<JobExecution> executions = jobExplorer.getJobExecutions(instance);\n                for (JobExecution execution : executions) {\n                    System.out.printf(\"  Execution ID: %d, Status: %s, Exit: %s, Start: %s, End: %s%n\",\n                            execution.getId(),\n                            execution.getStatus(),\n                            execution.getExitStatus(),\n                            execution.getStartTime(),\n                            execution.getEndTime());\n\n                    // BATCH_STEP_EXECUTION: all steps in this execution\n                    for (StepExecution stepExecution : execution.getStepExecutions()) {\n                        System.out.printf(\"    Step: %s, Read: %d, Write: %d, Commit: %d, Skip: %d, Status: %s%n\",\n                                stepExecution.getStepName(),\n                                stepExecution.getReadCount(),\n                                stepExecution.getWriteCount(),\n                                stepExecution.getCommitCount(),\n                                stepExecution.getSkipCount(),\n                                stepExecution.getStatus());\n\n                        // STEP_EXECUTION_CONTEXT: restart state\n                        if (stepExecution.getExecutionContext().containsKey(\"FlatFileItemReader.read.count\")) {\n                            System.out.printf(\"      Restart position (line): %d%n\",\n                                    stepExecution.getExecutionContext().getLong(\"FlatFileItemReader.read.count\"));\n                        }\n                    }\n                }\n            }\n        }\n    }\n}",
+    "codeLabel": "java",
+    "note": {
+      "label": "WHY THIS MATTERS",
+      "text": "When a job fails at 3 AM, your first diagnostic step is querying BATCH_STEP_EXECUTION for the failed step's status, commit count, and exception message. Understanding the schema turns a panic into a 30-second SQL query.",
+      "tone": "green"
+    },
+    "quiz": {
+      "question": "A job named <code>reconciliationJob</code> with parameters <code>{processDate=2026-07-15}</code> failed on its first run. An operator restarted it, and it completed successfully on the second attempt. How many rows exist in <code>BATCH_JOB_EXECUTION</code> for this <code>JobInstance</code> after the restart?",
+      "options": [
+        {
+          "label": "1 — the failed execution is overwritten with the successful status",
+          "correct": false
+        },
+        {
+          "label": "2 — one row for the initial failed attempt and one row for the successful restart",
+          "correct": true
+        },
+        {
+          "label": "3 — one for the initial run, one for the restart, and one for the final completion summary",
+          "correct": false
+        },
+        {
+          "label": "0 — the JobRepository only stores the most recent execution per instance",
+          "correct": false
+        }
+      ],
+      "explanation": "The JobRepository schema is append-only. A failed execution creates a BATCH_JOB_EXECUTION row with status FAILED. A restart creates a new JobExecution row linked to the same JobInstance, with its own STARTED/COMPLETED/FAILED status. The failed row is never deleted or overwritten. This immutable history is essential for audit trails and debugging. Two rows total: one FAILED, one COMPLETED."
+    }
+  },
+  {
+    "id": "3.2",
+    "title": "JdbcJobRepository Setup",
+    "duration": "9 min",
+    "kind": "setup",
+    "summary": [
+      "Spring Batch 5.2 requires a real relational database for the <code>JobRepository</code>. The in-memory map-based repository was removed in 5.x (see 3.5), so even local development needs a real database — typically H2, PostgreSQL, or an embedded database. The <code>JdbcJobRepository</code> is the standard implementation, and it stores all execution metadata in the six tables described in 3.1. Setting it up correctly is not just about getting the tables created; it is about configuring isolation levels, table prefixes, and schema initialization so that the repository behaves correctly under concurrent access and restart scenarios.",
+      "The <code>JobRepository</code> is created automatically by Spring Boot 3.5 auto-configuration if it detects Spring Batch on the classpath and a <code>DataSource</code> bean. The auto-configuration uses the primary <code>DataSource</code> by default. You can customize this by providing a dedicated <code>DataSource</code> for the <code>JobRepository</code> — useful when you want to isolate metadata contention from business transactions (see 11.14). The key property is <code>spring.batch.jdbc.initialize-schema</code>, which controls whether Spring Boot creates the batch tables on startup. Values are <code>always</code> (create every time, useful for H2 in tests), <code>embedded</code> (create only for embedded databases like H2, the default), and <code>never</code> (assume a DBA has created the tables, required for production databases where the application should not have DDL privileges).",
+      "The default transaction isolation level for <code>JobRepository</code> operations is <code>ISOLATION_SERIALIZABLE</code>. This is the strictest level: it prevents phantom reads, which is critical because the framework queries <code>BATCH_JOB_INSTANCE</code> to check if a job already exists with the same parameters, then inserts a new <code>BATCH_JOB_EXECUTION</code> row. If two threads launch the same job with identical parameters simultaneously, serializable isolation prevents both from creating duplicate executions. However, <code>SERIALIZABLE</code> is expensive on some databases (notably Oracle and SQL Server) and can cause lock contention or serialization failures under high concurrency. You can override this via <code>BatchConfigurer</code> or by customizing the <code>JobRepositoryFactoryBean</code> to use <code>ISOLATION_REPEATABLE_READ</code> or <code>ISOLATION_READ_COMMITTED</code> if your database and concurrency patterns allow it. For most reconciliation jobs with single-threaded or moderately concurrent launches, the default is safe.",
+      "The <code>tablePrefix</code> property allows multiple Spring Batch applications to share the same database schema without table name collisions. By default, the prefix is <code>BATCH_</code>, producing table names like <code>BATCH_JOB_EXECUTION</code>. If you set <code>tablePrefix=RECON_</code>, the tables become <code>RECON_JOB_EXECUTION</code>, etc. This is useful in environments where a single database instance hosts multiple batch applications and the DBA prefers namespace separation over separate schemas. When changing the prefix, you must also ensure the schema initialization scripts (if used) create tables with the matching prefix. Spring Boot does not auto-adjust the DDL scripts for custom prefixes; you must provide your own <code>schema-*.sql</code> files or use a database migration tool like Flyway or Liquibase."
+    ],
+    "keyPoints": [
+      "Spring Boot 3.5 auto-configures the <code>JdbcJobRepository</code> using the primary <code>DataSource</code>.",
+      "<code>spring.batch.jdbc.initialize-schema</code> controls DDL: <code>always</code> (dev/test), <code>embedded</code> (default), <code>never</code> (production).",
+      "Default isolation is <code>SERIALIZABLE</code> to prevent duplicate job executions under concurrent launches; override if your database struggles with it.",
+      "<code>tablePrefix</code> allows multiple applications to share one database; requires matching DDL scripts.",
+      "For production, use <code>never</code> and manage schema via Flyway/Liquibase with application-specific migration files."
+    ],
+    "code": "package com.example.reconciliation.config;\n\nimport org.springframework.batch.core.repository.JobRepository;\nimport org.springframework.batch.core.repository.support.JobRepositoryFactoryBean;\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Configuration;\nimport org.springframework.context.annotation.Primary;\nimport org.springframework.core.io.ClassPathResource;\nimport org.springframework.jdbc.datasource.init.DataSourceInitializer;\nimport org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;\nimport org.springframework.transaction.PlatformTransactionManager;\nimport org.springframework.transaction.annotation.Isolation;\n\nimport javax.sql.DataSource;\n\n@Configuration\npublic class JobRepositorySetupConfig {\n\n    // Custom JobRepository with dedicated DataSource and table prefix\n    @Bean\n    public JobRepository jobRepository(\n            DataSource batchMetadataDataSource,\n            PlatformTransactionManager batchTransactionManager) throws Exception {\n\n        JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();\n        factory.setDataSource(batchMetadataDataSource);\n        factory.setTransactionManager(batchTransactionManager);\n        factory.setTablePrefix(\"RECON_\");\n        // SERIALIZABLE prevents duplicate JobExecution under concurrent launches.\n        // Override only if your database has serialization performance issues\n        // and you have alternative deduplication (e.g., application-level locking).\n        factory.setIsolationLevelForCreate(Isolation.SERIALIZABLE.value());\n        factory.setMaxVarCharLength(2500);\n        factory.afterPropertiesSet();\n        return factory.getObject();\n    }\n\n    // Production: schema managed by Flyway/Liquibase, not Spring Boot auto-init.\n    // This bean is only active in dev/test profiles.\n    @Bean\n    public DataSourceInitializer batchSchemaInitializer(DataSource batchMetadataDataSource) {\n        DataSourceInitializer initializer = new DataSourceInitializer();\n        initializer.setDataSource(batchMetadataDataSource);\n\n        ResourceDatabasePopulator populator = new ResourceDatabasePopulator();\n        // Custom DDL with RECON_ prefix matching the JobRepository configuration.\n        // In production, this is handled by Flyway migration V001__create_batch_schema.sql\n        populator.addScript(new ClassPathResource(\"schema-recon-batch.sql\"));\n        initializer.setDatabasePopulator(populator);\n\n        return initializer;\n    }\n\n    // application.properties / application.yml:\n    //\n    // spring.batch.jdbc.initialize-schema=never  # Production: DBA/Flyway owns schema\n    // spring.batch.jdbc.initialize-schema=embedded  # Default: only for H2/Derby\n    // spring.batch.jdbc.initialize-schema=always  # Dev: recreate every startup\n}",
+    "codeLabel": "java",
+    "note": {
+      "label": "WARNING",
+      "text": "Never set spring.batch.jdbc.initialize-schema=always in production. If the application restarts, it will attempt to recreate existing tables, which fails or drops data depending on the script. Use 'never' in production and manage schema via your migration tool.",
+      "tone": "accent"
+    },
+    "quiz": {
+      "question": "Your production PostgreSQL database hosts two Spring Batch applications: <code>reconciliation-service</code> and <code>settlement-service</code>. Both use the default <code>BATCH_</code> table prefix. What is the most likely operational problem?",
+      "options": [
+        {
+          "label": "PostgreSQL cannot handle two applications writing to the same schema simultaneously",
+          "correct": false
+        },
+        {
+          "label": "The two applications will collide on the same table names, causing one app to see the other's job executions and potentially corrupt metadata",
+          "correct": true
+        },
+        {
+          "label": "Spring Batch automatically creates separate schemas for each application",
+          "correct": false
+        },
+        {
+          "label": "The JobRepository uses row-level locking that prevents concurrent access across applications",
+          "correct": false
+        }
+      ],
+      "explanation": "With the default BATCH_ prefix, both applications write to the same tables (BATCH_JOB_INSTANCE, BATCH_JOB_EXECUTION, etc.). Application A's job executions are visible to Application B's JobExplorer queries. Worse, if both apps have a job named 'nightlyJob', they will share the same JobInstance rows because the instance key is (jobName + parameters). This causes cross-application corruption, restart failures, and incorrect dashboard metrics. The fix is to use distinct table prefixes (e.g., RECON_ and SETTLE_) or separate database schemas."
+    }
+  },
+  {
+    "id": "3.3",
+    "title": "@EnableBatchProcessing — Version-Critical",
+    "duration": "8 min",
+    "kind": "concept",
+    "summary": [
+      "In Spring Boot 2.x and early Spring Batch 4.x, <code>@EnableBatchProcessing</code> was the standard way to activate Spring Batch auto-configuration. It triggered the creation of a <code>JobRepository</code>, <code>JobLauncher</code>, <code>JobExplorer</code>, and <code>JobOperator</code> from the application's <code>DataSource</code> and transaction manager. In Spring Boot 3.5 with Spring Batch 5.2, this annotation has a <strong>subtle but critical</strong> behavior change: <em>adding it disables Spring Boot's auto-configuration for batch infrastructure</em>. Instead, the annotation's own configuration takes over, creating beans based on the annotation's attributes rather than Boot's properties.",
+      "This means that in Boot 3.5, if you add <code>@EnableBatchProcessing</code> to your main application class <em>without any customization</em>, you are actively <strong>turning off</strong> the smarter auto-configuration that reads <code>spring.batch.*</code> properties from your <code>application.yml</code>. Properties like <code>spring.batch.jdbc.initialize-schema</code>, <code>spring.batch.job.names</code>, and <code>spring.batch.jdbc.schema</code> may be ignored because the annotation-based configuration does not know about them. The beans created by the annotation use default settings: the primary <code>DataSource</code>, a default table prefix, and no schema initialization. This is a common source of confusion when developers migrate from Boot 2.x: they add the annotation out of habit, and suddenly their <code>spring.batch.jdbc.initialize-schema=never</code> property is ignored, causing table creation failures in production.",
+      "The correct rule for Spring Boot 3.5 is: <strong>do not add <code>@EnableBatchProcessing</code> unless you are explicitly customizing the <code>JobRepository</code> or <code>PlatformTransactionManager</code> in ways that Boot's auto-configuration cannot handle.</strong> If you need a custom <code>JobRepository</code> (e.g., with a non-default <code>DataSource</code>, a custom table prefix, or a different isolation level), you should define the <code>JobRepository</code> bean explicitly in a <code>@Configuration</code> class (see 3.2) and let Boot auto-configure everything else. If you need a custom <code>PlatformTransactionManager</code> for batch (e.g., a JTA transaction manager spanning multiple resources), define that bean and let Boot wire it into the auto-configured <code>JobRepository</code>. Only if you need to override <em>multiple</em> infrastructure beans in a coordinated way should you consider <code>@EnableBatchProcessing</code> — and even then, you are opting out of Boot's property-driven configuration.",
+      "The annotation also has a <code>modular</code> attribute (<code>@EnableBatchProcessing(modular = true)</code>) that was used in Spring Batch 4.x to support dynamic job registration from multiple modules. In Spring Batch 5.2, this attribute is deprecated and has no effect. In Spring Batch 6.0, the entire <code>@EnableBatchProcessing</code> annotation is deprecated in favor of a new <code>BatchConfigurer</code> interface and explicit bean configuration. If you are writing code today that will migrate to 6.0, prefer explicit bean configuration over the annotation. This lecture's code shows the Boot 3.5 / Batch 5.2 pattern: no annotation, explicit beans only when needed, and full reliance on auto-configuration for the standard case."
+    ],
+    "keyPoints": [
+      "In Spring Boot 3.5, <code>@EnableBatchProcessing</code> <strong>disables</strong> Boot's batch auto-configuration.",
+      "Without the annotation, Boot auto-configures <code>JobRepository</code>, <code>JobLauncher</code>, and <code>JobExplorer</code> from <code>spring.batch.*</code> properties.",
+      "Only add the annotation if you need explicit, coordinated customization of multiple infrastructure beans.",
+      "For custom <code>JobRepository</code> or transaction manager, define the bean explicitly and let Boot auto-configure the rest.",
+      "<code>modular = true</code> is deprecated in 5.2 and removed in 6.0; prefer explicit configuration for future-proofing."
+    ],
+    "code": "package com.example.reconciliation.config;\n\nimport org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;\nimport org.springframework.batch.core.repository.JobRepository;\nimport org.springframework.batch.core.repository.support.JobRepositoryFactoryBean;\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Configuration;\nimport org.springframework.transaction.PlatformTransactionManager;\n\nimport javax.sql.DataSource;\n\n@Configuration\n// WRONG for Spring Boot 3.5 unless you explicitly need custom infrastructure:\n// @EnableBatchProcessing  // <-- This disables Boot's auto-config!\n//\n// CORRECT approach: let Boot auto-configure, and only override specific beans.\npublic class CorrectBatchConfig {\n\n    // Spring Boot 3.5 auto-configures JobRepository, JobLauncher, JobExplorer\n    // from the primary DataSource and PlatformTransactionManager automatically.\n    // No annotation needed.\n\n    // If you need a custom JobRepository (e.g., dedicated DataSource for metadata):\n    @Bean\n    public JobRepository customJobRepository(\n            DataSource batchMetadataDataSource,\n            PlatformTransactionManager batchTransactionManager) throws Exception {\n\n        JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();\n        factory.setDataSource(batchMetadataDataSource);\n        factory.setTransactionManager(batchTransactionManager);\n        factory.afterPropertiesSet();\n        return factory.getObject();\n    }\n\n    // If you need a custom transaction manager for batch (e.g., JTA):\n    // @Bean\n    // public PlatformTransactionManager batchTransactionManager() {\n    //     return new JtaTransactionManager(); // or DataSourceTransactionManager for dedicated DS\n    // }\n\n    // Boot auto-configuration will inject the custom JobRepository into\n    // JobBuilder and StepBuilder constructors throughout your @Configuration classes.\n}\n\n// Looking ahead to Spring Batch 6.0 (callout box):\n// In 6.0, @EnableBatchProcessing is fully deprecated. The new pattern is:\n//\n// @Configuration\n// public class BatchConfig implements BatchConfigurer {\n//     @Override\n//     public JobRepository getJobRepository() { ... }\n//     @Override\n//     public PlatformTransactionManager getTransactionManager() { ... }\n//     // etc.\n// }\n//\n// The explicit bean approach shown above is forward-compatible with 6.0.",
+    "codeLabel": "java",
+    "note": {
+      "label": "DECISION POINT",
+      "text": "If you add @EnableBatchProcessing out of habit from older Spring Boot versions, you will silently lose all spring.batch.* property configuration. Remove it unless you have a specific, documented reason to override the auto-configuration.",
+      "tone": "accent"
+    },
+    "quiz": {
+      "question": "A developer migrating from Spring Boot 2.7 to Spring Boot 3.5 keeps <code>@EnableBatchProcessing</code> on the main application class. They set <code>spring.batch.jdbc.initialize-schema=never</code> in <code>application.yml</code>, but the application still attempts to create batch tables on startup. What is the root cause?",
+      "options": [
+        {
+          "label": "The property name changed in Spring Boot 3.5 and should be spring.batch.schema.initialize",
+          "correct": false
+        },
+        {
+          "label": "@EnableBatchProcessing disables Boot's auto-configuration, so the property is ignored and the annotation's default behavior (initialize schema) takes over",
+          "correct": true
+        },
+        {
+          "label": "The application.yml file is not being loaded because the profile is not active",
+          "correct": false
+        },
+        {
+          "label": "Spring Batch 5.2 no longer supports the never option for schema initialization",
+          "correct": false
+        }
+      ],
+      "explanation": "In Spring Boot 3.5, @EnableBatchProcessing opts out of Boot's batch auto-configuration entirely. The annotation-based configuration does not read spring.batch.* properties. It uses its own defaults, which include schema initialization behavior that may differ from Boot's auto-config. Removing the annotation restores Boot's property-driven auto-configuration, respecting spring.batch.jdbc.initialize-schema=never. The property name did not change, and never is still a valid value."
+    }
+  },
+  {
+    "id": "3.4",
+    "title": "JobBuilder and StepBuilder Fluent API",
+    "duration": "9 min",
+    "kind": "concept",
+    "summary": [
+      "In Spring Batch 5.x, the factory-based configuration pattern (<code>JobBuilderFactory</code> and <code>StepBuilderFactory</code>) was removed. These factories were convenient in Spring Batch 4.x because they automatically injected the <code>JobRepository</code> into every builder, but they created tight coupling between job configuration classes and the framework's internal factory infrastructure. In Spring Batch 5.2, the builder classes (<code>JobBuilder</code> and <code>StepBuilder</code>) are instantiated directly via their constructors, and the <code>JobRepository</code> (and <code>PlatformTransactionManager</code> for steps) is passed explicitly. This change is not just cosmetic — it makes the dependencies visible, testable, and compatible with Spring Boot 3.5's constructor-based auto-wiring.",
+      "The <code>JobBuilder</code> constructor takes two arguments: the job name (a <code>String</code>) and the <code>JobRepository</code>. The job name is used to identify the job in the <code>JobRepository</code> and must be unique within the application. The <code>JobRepository</code> is where the job's execution metadata is stored. From the <code>JobBuilder</code>, you chain methods to define the job's flow: <code>.start(Step)</code> for a single-step job, or <code>.start(Step).on(ExitStatus).to(Step).from(...)</code> for conditional flows (see Section 12). The builder returns a <code>Job</code> bean that Spring manages and that the <code>JobLauncher</code> can execute. Because the <code>JobRepository</code> is injected via constructor, you can write pure unit tests for your job configuration by passing a mock or in-memory repository — though remember, there is no true in-memory repository in 5.x (see 3.5).",
+      "The <code>StepBuilder</code> constructor also takes the step name and the <code>JobRepository</code>. For chunk-oriented steps, you then call <code>.&lt;InputType, OutputType&gt;chunk(chunkSize, transactionManager)</code> to specify the chunk size and the <code>PlatformTransactionManager</code> that will manage the chunk transactions. This generic type declaration (<code>&lt;TransactionRecord, ReconciledTransaction&gt;</code>) is what allows the compiler to enforce that the reader produces <code>TransactionRecord</code>, the processor accepts <code>TransactionRecord</code> and produces <code>ReconciledTransaction</code>, and the writer accepts <code>ReconciledTransaction</code>. If the types do not align, the compilation fails — a type safety improvement over the raw-type factories in 4.x. After the chunk declaration, you chain <code>.reader()</code>, <code>.processor()</code>, and <code>.writer()</code> to wire the components.",
+      "For tasklet steps (see 4.3), the builder pattern is similar but uses <code>.tasklet(Tasklet, transactionManager)</code> instead of <code>.chunk()</code>. The <code>Tasklet</code> interface and the transaction manager are passed directly. The fluent API supports additional configuration methods that are shared across step types: <code>.listener()</code> to add execution listeners (Section 8), <code>.faultTolerant()</code> to enable skip/retry (Section 9), <code>.taskExecutor()</code> to add multi-threading (Section 11.2), and <code>.startLimit()</code> to restrict how many times a step can be started. These methods are available on the builder returned by <code>.chunk()</code> or <code>.tasklet()</code>, so the configuration flows naturally from the step type declaration to its behavioral tuning. The key mental model: the builder is a <em>declarative configuration object</em>, not an imperative script. It describes what the step should do; the framework executes it later."
+    ],
+    "keyPoints": [
+      "<code>JobBuilderFactory</code> and <code>StepBuilderFactory</code> were removed in Spring Batch 5.x.",
+      "<code>JobBuilder</code> and <code>StepBuilder</code> are instantiated directly with <code>JobRepository</code> passed explicitly.",
+      "Chunk steps use <code>.&lt;I, O&gt;chunk(size, transactionManager)</code> for type-safe reader/processor/writer wiring.",
+      "Tasklet steps use <code>.tasklet(tasklet, transactionManager)</code>.",
+      "The fluent API supports <code>.listener()</code>, <code>.faultTolerant()</code>, <code>.taskExecutor()</code>, and <code>.startLimit()</code> chaining.",
+      "Constructor injection of <code>JobRepository</code> makes configuration testable and aligned with Spring Boot 3.5 patterns."
+    ],
+    "code": "package com.example.reconciliation.batch;\n\nimport com.example.reconciliation.domain.ReconciledTransaction;\nimport com.example.reconciliation.domain.TransactionRecord;\nimport org.springframework.batch.core.Job;\nimport org.springframework.batch.core.Step;\nimport org.springframework.batch.core.job.builder.JobBuilder;\nimport org.springframework.batch.core.repository.JobRepository;\nimport org.springframework.batch.core.step.builder.StepBuilder;\nimport org.springframework.batch.item.ItemProcessor;\nimport org.springframework.batch.item.ItemReader;\nimport org.springframework.batch.item.ItemWriter;\nimport org.springframework.batch.item.file.FlatFileItemReader;\nimport org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;\nimport org.springframework.batch.item.file.mapping.RecordFieldSetMapper;\nimport org.springframework.batch.repeat.RepeatStatus;\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Configuration;\nimport org.springframework.core.io.FileSystemResource;\nimport org.springframework.core.task.TaskExecutor;\nimport org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;\nimport org.springframework.transaction.PlatformTransactionManager;\n\nimport java.math.BigDecimal;\n\n@Configuration\npublic class FluentApiConfig {\n\n    private final JobRepository jobRepository;\n    private final PlatformTransactionManager transactionManager;\n\n    // Constructor injection — Spring Boot 3.5 auto-configures these beans.\n    public FluentApiConfig(JobRepository jobRepository,\n                           PlatformTransactionManager transactionManager) {\n        this.jobRepository = jobRepository;\n        this.transactionManager = transactionManager;\n    }\n\n    @Bean\n    public Job fluentApiJob() {\n        // JobBuilder constructor: name + JobRepository\n        return new JobBuilder(\"fluentApiJob\", jobRepository)\n                .start(chunkStep())\n                .next(taskletStep())\n                .build();\n    }\n\n    @Bean\n    public Step chunkStep() {\n        // StepBuilder constructor: name + JobRepository\n        // Then declare chunk type and size, plus transaction manager.\n        return new StepBuilder(\"chunkStep\", jobRepository)\n                .<TransactionRecord, ReconciledTransaction>chunk(100, transactionManager)\n                .reader(csvReader())\n                .processor(reconciliationProcessor())\n                .writer(reconciliationWriter())\n                // Additional configuration via fluent chaining:\n                .faultTolerant()\n                .skipLimit(5)\n                .skip(IllegalArgumentException.class)\n                .retryLimit(3)\n                .retry(org.springframework.dao.TransientDataAccessException.class)\n                .taskExecutor(stepTaskExecutor())\n                .build();\n    }\n\n    @Bean\n    public Step taskletStep() {\n        // Tasklet step: no chunk, just a single-shot operation\n        return new StepBuilder(\"taskletStep\", jobRepository)\n                .tasklet((contribution, chunkContext) -> {\n                    System.out.println(\"Tasklet executed: post-processing cleanup\");\n                    return RepeatStatus.FINISHED;\n                }, transactionManager)\n                .build();\n    }\n\n    @Bean\n    public FlatFileItemReader<TransactionRecord> csvReader() {\n        return new FlatFileItemReaderBuilder<TransactionRecord>()\n                .name(\"csvReader\")\n                .resource(new FileSystemResource(\"data/transactions.csv\"))\n                .linesToSkip(1)\n                .delimited()\n                .names(\"transactionId\", \"accountId\", \"amount\", \"currency\", \"transactionDate\", \"status\")\n                .fieldSetMapper(new RecordFieldSetMapper<>(TransactionRecord.class))\n                .build();\n    }\n\n    @Bean\n    public ItemProcessor<TransactionRecord, ReconciledTransaction> reconciliationProcessor() {\n        return record -> {\n            boolean matched = record.amount() != null\n                    && record.amount().compareTo(BigDecimal.ZERO) > 0\n                    && \"SETTLED\".equals(record.status());\n            return new ReconciledTransaction(\n                    record.transactionId(),\n                    record.accountId(),\n                    record.amount(),\n                    matched ? \"MATCHED\" : \"MISMATCHED\",\n                    \"Fluent API demo\"\n            );\n        };\n    }\n\n    @Bean\n    public ItemWriter<ReconciledTransaction> reconciliationWriter() {\n        return chunk -> chunk.forEach(tx ->\n            System.out.printf(\"[Fluent] %s -> %s%n\", tx.transactionId(), tx.reconciliationStatus())\n        );\n    }\n\n    @Bean\n    public TaskExecutor stepTaskExecutor() {\n        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();\n        executor.setCorePoolSize(4);\n        executor.setThreadNamePrefix(\"fluent-step-\");\n        executor.initialize();\n        return executor;\n    }\n}",
+    "codeLabel": "java",
+    "note": {
+      "label": "KEY INSIGHT",
+      "text": "The explicit constructor pattern makes your job configuration a plain Spring bean with visible dependencies. This is not just cleaner — it is the only pattern that survives into Spring Batch 6.0 without deprecation warnings.",
+      "tone": "accent"
+    },
+    "quiz": {
+      "question": "A developer migrating from Spring Batch 4.x writes the following configuration. What is wrong with it for Spring Batch 5.2 / Spring Boot 3.5?\n\n<code>@Autowired private JobBuilderFactory jobBuilderFactory;</code>\n<code>@Autowired private StepBuilderFactory stepBuilderFactory;</code>",
+      "options": [
+        {
+          "label": "The factories still exist but are deprecated; the code compiles with warnings",
+          "correct": false
+        },
+        {
+          "label": "The factories were removed in Spring Batch 5.x; the code will not compile",
+          "correct": true
+        },
+        {
+          "label": "The factories work but disable Spring Boot 3.5 auto-configuration",
+          "correct": false
+        },
+        {
+          "label": "The factories require @EnableBatchProcessing to be present, which is no longer recommended",
+          "correct": false
+        }
+      ],
+      "explanation": "JobBuilderFactory and StepBuilderFactory were removed entirely in Spring Batch 5.x. They do not exist in the classpath. Any code referencing them will fail to compile. The replacement is direct constructor injection of JobRepository and explicit instantiation of JobBuilder and StepBuilder. Option D is a distractor: while @EnableBatchProcessing is no longer recommended, the factories themselves are gone regardless of the annotation."
+    }
+  },
+  {
+    "id": "3.5",
+    "title": "Why There's No In-Memory Repository Anymore",
+    "duration": "7 min",
+    "kind": "concept",
+    "summary": [
+      "In Spring Batch 4.x and earlier, a <code>MapJobRepositoryFactoryBean</code> provided an in-memory, non-persistent <code>JobRepository</code> backed by a <code>ConcurrentHashMap</code>. It was convenient for unit tests and quick demos: no database setup, no schema scripts, no connection pools. You could run a batch job in a test and it would execute in memory, leaving no trace. In Spring Batch 5.x, this was removed entirely. The rationale was not arbitrary — it was a deliberate design decision to enforce production-grade behavior from the first line of code. The in-memory repository created a dangerous illusion: jobs appeared to work in tests but would fail in production because the real <code>JdbcJobRepository</code> has different transactional behavior, serialization constraints, and performance characteristics.",
+      "The practical implication is that <strong>even local development and unit tests need a real database</strong>. The standard approach in Spring Boot 3.5 is to use an embedded database like H2 for tests and local development, and a real database (PostgreSQL, MySQL, Oracle) for production. H2 is lightweight, starts in-process, and Spring Boot auto-configures it with <code>spring.batch.jdbc.initialize-schema=embedded</code> (the default), which creates the batch tables automatically. This gives you the convenience of 'no setup' while still using the real <code>JdbcJobRepository</code> code path. Your tests exercise the same repository implementation that runs in production, eliminating the 'works on my machine' class of bugs where in-memory behavior diverges from JDBC behavior.",
+      "The removal also forces developers to think about schema initialization and migration from day one. With the in-memory repository, schema was irrelevant — there was no schema. With H2 or PostgreSQL, you must decide how tables are created: Boot auto-initialization for dev/test, Flyway or Liquibase migrations for production. This friction is intentional. It ensures that when the application reaches production, the team has already solved the schema management problem, tested it in staging, and documented the migration scripts. The alternative — discovering on production deployment day that the application tries to create tables it does not have privileges for — is a common failure mode that the removal of the in-memory repository prevents.",
+      "For integration tests, the pattern is to use <code>@SpringBootTest</code> with an H2 in-memory database (configured via <code>application-test.yml</code>) and let Boot auto-create the batch schema. For end-to-end job tests, <code>JobLauncherTestUtils</code> (see 14.1) launches the job against this real H2 repository, and you can query the results using <code>JobExplorer</code> or direct JDBC queries. The test validates not just business logic but also restart behavior, <code>ExecutionContext</code> persistence, and transaction commit/rollback — all of which were silently skipped with the old in-memory repository. The cost is a slightly slower test startup (H2 initialization takes ~1 second), but the confidence gained is worth it for any job that will run in production."
+    ],
+    "keyPoints": [
+      "<code>MapJobRepositoryFactoryBean</code> was removed in Spring Batch 5.x to enforce production-grade behavior in all environments.",
+      "Even local development and tests must use a real database (H2 for dev/test, PostgreSQL/MySQL/Oracle for production).",
+      "H2 with <code>initialize-schema=embedded</code> provides 'zero setup' convenience while using the real JdbcJobRepository code path.",
+      "The removal forces teams to solve schema management (Flyway/Liquibase) before production deployment.",
+      "Integration tests with H2 validate restartability, ExecutionContext persistence, and transaction behavior — all skipped by the old in-memory repository."
+    ],
+    "code": "package com.example.reconciliation.config;\n\nimport org.springframework.boot.test.context.TestConfiguration;\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Primary;\nimport org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;\nimport org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;\n\nimport javax.sql.DataSource;\n\n@TestConfiguration\npublic class TestDataSourceConfig {\n\n    // Test-specific H2 database for integration tests.\n    // Spring Boot auto-configures JdbcJobRepository against this DataSource.\n    // The schema is created automatically because\n    // spring.batch.jdbc.initialize-schema=embedded (default for embedded DBs).\n    @Bean\n    @Primary\n    public DataSource testDataSource() {\n        return new EmbeddedDatabaseBuilder()\n                .setType(EmbeddedDatabaseType.H2)\n                .setName(\"batch_test_db\")\n                .build();\n    }\n\n    // application-test.yml:\n    //\n    // spring:\n    //   datasource:\n    //     url: jdbc:h2:mem:batch_test_db\n    //     driver-class-name: org.h2.Driver\n    //   batch:\n    //     jdbc:\n    //       initialize-schema: embedded  # default, creates BATCH_* tables automatically\n    //\n    // This ensures tests use the EXACT same JdbcJobRepository implementation\n    // as production, just against an in-memory H2 database instead of PostgreSQL.\n}\n\n// Example integration test using the real repository:\n//\n// @SpringBootTest\n// @ActiveProfiles(\"test\")\n// public class ReconciliationJobIntegrationTest {\n//     @Autowired private JobLauncherTestUtils jobLauncherTestUtils;\n//     @Autowired private JobExplorer jobExplorer;\n//\n//     @Test\n//     public void testJobCompletesAndWritesToRepository() throws Exception {\n//         JobExecution execution = jobLauncherTestUtils.launchJob();\n//         assertEquals(BatchStatus.COMPLETED, execution.getStatus());\n//\n//         // Query the real H2 repository to verify step counts\n//         List<JobInstance> instances = jobExplorer.findJobInstancesByJobName(\"reconciliationJob\", 0, 1);\n//         assertFalse(instances.isEmpty());\n//     }\n// }",
+    "codeLabel": "java",
+    "note": {
+      "label": "WHY THIS MATTERS",
+      "text": "The in-memory repository hid transaction and serialization bugs that only appeared in production. Using H2 in tests means your first encounter with a JDBC serialization exception or isolation-level deadlock happens in a test, not at 2 AM on a production database.",
+      "tone": "green"
+    },
+    "quiz": {
+      "question": "A team migrating from Spring Batch 4.x to 5.2 discovers that their extensive unit test suite, which relied on <code>MapJobRepositoryFactoryBean</code>, no longer compiles. They argue that H2 is unnecessary overhead for 'simple' tests. What is the strongest technical counter-argument?",
+      "options": [
+        {
+          "label": "H2 is faster than the old Map-based repository for large datasets",
+          "correct": false
+        },
+        {
+          "label": "The Map-based repository had memory leaks that H2 avoids",
+          "correct": false
+        },
+        {
+          "label": "Tests against the Map-based repository did not exercise JDBC serialization, transaction boundaries, or isolation levels, allowing bugs to reach production undetected",
+          "correct": true
+        },
+        {
+          "label": "Spring Boot 3.5 does not support H2 and requires PostgreSQL even in tests",
+          "correct": false
+        }
+      ],
+      "explanation": "The primary rationale for removing MapJobRepositoryFactoryBean was that it created a false sense of security. Code that passed tests against the in-memory repository could fail in production due to JDBC-specific behavior: serialization of ExecutionContext (which catches non-serializable objects), transaction isolation level effects (e.g., SERIALIZABLE deadlocks), and connection pool exhaustion. H2 uses the exact same JdbcJobRepository code path as PostgreSQL, so these issues are caught in tests. Speed (option A) and memory leaks (option B) are not the primary concerns. Spring Boot 3.5 absolutely supports H2 (option D is false)."
+    }
+  }
+]

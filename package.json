@@ -11,7 +11,13 @@
     "generate": "python scripts/generate-from-transcripts.py",
     "register-course": "python scripts/register-course.py",
     "build-course": "powershell -ExecutionPolicy Bypass -File scripts/build-course.ps1",
-    "build-course:dry": "powershell -ExecutionPolicy Bypass -File scripts/build-course.ps1 -DryRun"
+    "build-course:dry": "powershell -ExecutionPolicy Bypass -File scripts/build-course.ps1 -DryRun",
+    "build-course:ollama": "powershell -ExecutionPolicy Bypass -File scripts/build-course.ps1 -Ollama",
+    "generate-from-curriculum": "python scripts/generate-from-curriculum.py",
+    "build-batch": "powershell -ExecutionPolicy Bypass -File scripts/build-batch-course.ps1",
+    "build-batch:dry": "powershell -ExecutionPolicy Bypass -File scripts/build-batch-course.ps1 -DryRun",
+    "build-batch:section": "powershell -ExecutionPolicy Bypass -File scripts/build-batch-course.ps1 -SkipBuild",
+    "build-batch:ollama": "powershell -ExecutionPolicy Bypass -File scripts/build-batch-course.ps1 -Ollama"
   },
   "dependencies": {
     "lucide-react": "^1.24.0",
