@@ -70,7 +70,7 @@ export default function CodeBlock({ code, label = 'Example.java' }) {
   const [copied, setCopied] = useState(false)
   if (!code) return null
   if (label === 'python') {
-    return <Sandbox code={code} label={label} />
+    return <Sandbox key={code} code={code} label={label} />
   }
   const lines = code.replace(/\n+$/, '').split('\n')
 
