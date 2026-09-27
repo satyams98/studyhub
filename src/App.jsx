@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Router, useRoute, useParams } from './router'
 import TopNav from './components/TopNav'
 import Sidebar from './components/Sidebar'
+import CommandPalette from './components/CommandPalette'
 import HomePage from './pages/HomePage'
 import CoursePage from './pages/CoursePage'
 import GlossaryPage from './pages/GlossaryPage'
@@ -12,6 +13,7 @@ import './App.css'
 
 function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const { path } = useRoute()
   const { courseSlug, page, sectionSlug } = useParams()
 
@@ -32,7 +34,7 @@ function Shell() {
 
   return (
     <>
-      <TopNav onMenuClick={() => setMenuOpen((v) => !v)} />
+      <TopNav onMenuClick={() => setMenuOpen((v) => !v)} onSearchClick={() => setPaletteOpen(true)} />
       <div className="layout">
         {showSidebar && (
           <>
@@ -42,6 +44,7 @@ function Shell() {
         )}
         {pageEl}
       </div>
+      <CommandPalette open={paletteOpen} setOpen={setPaletteOpen} />
     </>
   )
 }

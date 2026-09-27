@@ -1,10 +1,12 @@
 import { useRoute, useParams } from '../router'
-import { Menu, ArrowRight, Home, Sun, Moon } from 'lucide-react'
+import { Menu, ArrowRight, Home, Sun, Moon, Search } from 'lucide-react'
 import { getCourse } from '../data'
 import { useProgress } from '../context/ProgressContext'
 import { useTheme } from '../context/ThemeContext'
 
-export default function TopNav({ onMenuClick }) {
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || '')
+
+export default function TopNav({ onMenuClick, onSearchClick }) {
   const { path, navigate } = useRoute()
   const { courseSlug } = useParams()
   const { completed } = useProgress()
@@ -61,6 +63,11 @@ export default function TopNav({ onMenuClick }) {
         )}
       </nav>
       <div className="topnav-right">
+        <button className="topnav-search-btn" onClick={onSearchClick} aria-label="Search">
+          <Search size={15} />
+          <span className="topnav-search-label">Search</span>
+          <kbd className="cmdk-kbd">{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
+        </button>
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
