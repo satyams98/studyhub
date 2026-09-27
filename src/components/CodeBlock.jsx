@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
+import Sandbox from './Sandbox'
 
 const JAVA_KEYWORDS = new Set([
   'public', 'private', 'protected', 'static', 'final', 'void', 'class', 'interface',
@@ -68,6 +69,9 @@ function highlight(line) {
 export default function CodeBlock({ code, label = 'Example.java' }) {
   const [copied, setCopied] = useState(false)
   if (!code) return null
+  if (label === 'python') {
+    return <Sandbox code={code} label={label} />
+  }
   const lines = code.replace(/\n+$/, '').split('\n')
 
   const handleCopy = async () => {
