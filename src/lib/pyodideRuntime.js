@@ -27,7 +27,10 @@ async function getPyodide() {
     pyodideLoadingPromise = (async () => {
       await loadScript(PYODIDE_CDN)
       return window.loadPyodide()
-    })()
+    })().catch((err) => {
+      pyodideLoadingPromise = null
+      throw err
+    })
   }
   return pyodideLoadingPromise
 }
@@ -38,7 +41,10 @@ async function ensurePackages(pyodide) {
       await pyodide.loadPackage('micropip')
       const micropip = pyodide.pyimport('micropip')
       await micropip.install(['numpy', 'matplotlib'])
-    })()
+    })().catch((err) => {
+      packagesReadyPromise = null
+      throw err
+    })
   }
   return packagesReadyPromise
 }
