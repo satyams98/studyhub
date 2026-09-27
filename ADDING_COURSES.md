@@ -69,6 +69,10 @@ docker run -d -p 8080:80 nginx`,
       text: 'Understanding containers is foundational to modern deployment.',
       tone: 'accent',       // 'accent' (default orange) or 'green'
     },
+    mermaid: `graph TD
+      A[Input] --> B[Model]
+      B --> C[Output]`,     // Optional — real Mermaid syntax, rendered client-side
+    crossRefs: ['1.2'],      // Optional — lesson IDs this lesson builds on; rendered as links
   },
   {
     id: '1.2',
@@ -91,9 +95,14 @@ docker run -d -p 8080:80 nginx`,
 | `kind`      | No       | string   | One of: theory, concept, demo, assignment, solution, faq, summary, setup |
 | `summary`   | Yes      | string[] | Array of paragraphs (the main lesson content)            |
 | `keyPoints` | No       | string[] | Bullet points (supports inline HTML like `<strong>`)     |
-| `code`      | No       | string   | Code snippet to display                                  |
+| `code`      | No       | string   | Code snippet to display. For `kind: 'assignment'`, this is the reference solution — hidden behind a "Reveal solution" toggle until clicked |
 | `codeLabel` | No       | string   | Label for the code block header                          |
 | `note`      | No       | object   | `{ label, text, tone }` callout box                      |
+| `diagram`   | No       | string   | Raw HTML for a hand-built diagram (custom CSS classes), injected as-is |
+| `mermaid`   | No       | string   | Mermaid diagram syntax, rendered to SVG. Separate from `diagram` — use this for anything structural (flows, architectures, pipelines) |
+| `crossRefs` | No       | string[] | Lesson IDs this lesson builds on, e.g. `['6.2', '6.3']`. Rendered as clickable "Builds on: Lesson 6.2, …" links |
+
+**Glossary tooltips are automatic, no extra field needed:** any `<em>` or `<code>` term in `summary`/`keyPoints`/topic bodies whose inner text exactly matches a glossary `term` (case-insensitive) gets a hover tooltip with that definition. Keep wording/casing consistent between prose and the glossary file.
 
 ### c) Glossary — `src/data/<course>-glossary.js`
 

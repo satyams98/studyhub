@@ -2,6 +2,8 @@ import { Link, useParams, useNavigate } from '../router'
 import { getCourse } from '../data'
 import { useProgress } from '../context/ProgressContext'
 import { ArrowRight, BookOpen, ChevronRight } from 'lucide-react'
+import { buildCourseMapMermaid } from '../utils'
+import MermaidDiagram from '../components/MermaidDiagram'
 
 export default function CoursePage() {
   const { courseSlug } = useParams()
@@ -19,6 +21,7 @@ export default function CoursePage() {
 
   const doneCount = course.allLessons.filter((l) => completed.has(`${courseSlug}:${l.id}`)).length
   const pct = course.totalLessons ? Math.round((doneCount / course.totalLessons) * 100) : 0
+  const courseMap = course.sections.length > 1 ? buildCourseMapMermaid(course) : null
 
   const handleContinue = () => {
     const next = course.allLessons.find((l) => !completed.has(`${courseSlug}:${l.id}`)) || course.allLessons[0]
@@ -66,6 +69,13 @@ export default function CoursePage() {
           </Link>
         </div>
       </div>
+
+      {courseMap && (
+        <>
+          <div className="domain-label">Course Map</div>
+          <MermaidDiagram code={courseMap} />
+        </>
+      )}
 
       <div className="domain-label">Curriculum</div>
 

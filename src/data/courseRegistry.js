@@ -35,6 +35,22 @@ import springBatch03 from './spring-batch-lessons/section03.json'
 import springBatch04 from './spring-batch-lessons/section04'
 import springBatch11 from './spring-batch-lessons/section11'
 
+import { sectionMeta as aiEngineeringSections } from './ai-engineering-sections'
+import { glossary as aiEngineeringGlossary } from './ai-engineering-glossary'
+import aiEngineering01 from './ai-engineering-lessons/section01'
+import aiEngineering02 from './ai-engineering-lessons/section02'
+import aiEngineering03 from './ai-engineering-lessons/section03'
+import aiEngineering04 from './ai-engineering-lessons/section04'
+import aiEngineering05 from './ai-engineering-lessons/section05'
+import aiEngineering06 from './ai-engineering-lessons/section06'
+import aiEngineering07 from './ai-engineering-lessons/section07'
+import aiEngineering08 from './ai-engineering-lessons/section08'
+import aiEngineering09 from './ai-engineering-lessons/section09'
+import aiEngineering10 from './ai-engineering-lessons/section10'
+import aiEngineering11 from './ai-engineering-lessons/section11'
+import aiEngineering12 from './ai-engineering-lessons/section12'
+import aiEngineering13 from './ai-engineering-lessons/section13'
+
 import { sectionMeta as dockerSections } from './docker-sections'
 import { glossary as dockerGlossary } from './docker-glossary'
 import docker01 from './docker-lessons/section01'
@@ -79,6 +95,14 @@ const springBatchLessonsBySection = {
 const dockerLessonsBySection = {
   1: docker01, 2: docker02, 3: docker03, 4: docker04, 5: docker05, 6: docker06, 7: docker07,
   8: docker08, 9: docker09, 10: docker10, 11: docker11, 12: docker12, 13: docker13, 14: docker14,
+}
+
+// Filled in section-by-section as lesson content is generated — see ADDING_COURSES.md.
+const aiEngineeringLessonsBySection = {
+  1: aiEngineering01, 2: aiEngineering02, 3: aiEngineering03, 4: aiEngineering04,
+  5: aiEngineering05, 6: aiEngineering06, 7: aiEngineering07, 8: aiEngineering08,
+  9: aiEngineering09, 10: aiEngineering10, 11: aiEngineering11, 12: aiEngineering12,
+  13: aiEngineering13,
 }
 
 
@@ -141,6 +165,20 @@ const courseDefs = [
     sectionMeta: dockerSections,
     lessonsBySection: dockerLessonsBySection,
     glossary: dockerGlossary,
+  },
+  {
+    slug: 'ai-engineering',
+    title: 'AI Engineering',
+    subtitle: 'From Prompting to Production',
+    description:
+      'A roadmap.sh-based curriculum from prompt engineering and RAG through agents, ' +
+      'fine-tuning, security, and production MLOps. Thirteen sections from Python/math ' +
+      'foundations to a capstone production AI knowledge platform.',
+    color: '#6E56CF',
+    tags: ['AI', 'LLMs', 'MLOps'],
+    sectionMeta: aiEngineeringSections,
+    lessonsBySection: aiEngineeringLessonsBySection,
+    glossary: aiEngineeringGlossary,
   },
 ]
 
