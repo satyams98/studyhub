@@ -15,10 +15,10 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
   const scrollRef = useRef(null)
-  const currentHistoryKeyRef = useRef(historyKey)
+  const requestGenRef = useRef(0)
 
   useEffect(() => {
-    currentHistoryKeyRef.current = historyKey
+    requestGenRef.current += 1
     setError(null)
     setSending(false)
     let cancelled = false
@@ -46,7 +46,7 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
     if (!question || sending) return
     setError(null)
     setInput('')
-    const requestKey = historyKey
+    const myGen = requestGenRef.current
     const nextMessages = [...messages, { role: 'user', content: question }]
     setMessages(nextMessages)
 
@@ -62,7 +62,7 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lessonContext, question, history: messages.slice(-10) }),
       })
-      if (currentHistoryKeyRef.current !== requestKey) return
+      if (requestGenRef.current !== myGen) return
       if (res.status === 429) {
         setError('Too many questions — please wait a moment and try again.')
         return
@@ -72,14 +72,14 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
         return
       }
       const data = await res.json()
-      if (currentHistoryKeyRef.current !== requestKey) return
+      if (requestGenRef.current !== myGen) return
       setMessages([...nextMessages, { role: 'assistant', content: data.answer }])
     } catch {
-      if (currentHistoryKeyRef.current === requestKey) {
+      if (requestGenRef.current === myGen) {
         setError("Couldn't reach the tutor service — check your connection and try again.")
       }
     } finally {
-      if (currentHistoryKeyRef.current === requestKey) setSending(false)
+      if (requestGenRef.current === myGen) setSending(false)
     }
   }
 
