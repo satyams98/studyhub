@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from '../router'
-import { ChevronRight as Sep, Check, ArrowLeft, ArrowRight, Eye } from 'lucide-react'
+import { ChevronRight as Sep, Check, ArrowLeft, ArrowRight, Eye, MessageCircle } from 'lucide-react'
 import { getCourse } from '../data'
 import { cleanTitle, KIND_LABEL, annotateGlossaryTerms } from '../utils'
 import { useProgress } from '../context/ProgressContext'
@@ -8,6 +8,7 @@ import CodeBlock from '../components/CodeBlock'
 import Callout from '../components/Callout'
 import Quiz from '../components/Quiz'
 import MermaidDiagram from '../components/MermaidDiagram'
+import LessonChat from '../components/LessonChat'
 
 export default function LessonPage() {
   const { courseSlug, sectionSlug, lessonSlug } = useParams()
@@ -15,6 +16,7 @@ export default function LessonPage() {
   const course = getCourse(courseSlug)
   const { isComplete, toggleComplete } = useProgress()
   const [solutionRevealed, setSolutionRevealed] = useState(false)
+  const [qaOpen, setQaOpen] = useState(false)
   const { section, lesson } = course ? course.findLesson(sectionSlug, lessonSlug) : {}
 
   useEffect(() => {
@@ -84,6 +86,9 @@ export default function LessonPage() {
         )}
         <button className={`btn-complete${done ? ' done' : ''}`} onClick={() => toggleComplete(progressKey)}>
           <Check size={14} /> {done ? 'Completed' : 'Mark complete'}
+        </button>
+        <button className="btn-outline" onClick={() => setQaOpen(true)}>
+          <MessageCircle size={14} /> Ask about this lesson
         </button>
       </div>
 
@@ -180,6 +185,7 @@ export default function LessonPage() {
           </button>
         ) : <div className="nav-spacer" />}
       </div>
+      <LessonChat open={qaOpen} onClose={() => setQaOpen(false)} lesson={lesson} courseSlug={courseSlug} />
     </main>
   )
 }
