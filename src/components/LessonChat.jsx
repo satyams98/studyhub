@@ -15,8 +15,12 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
   const scrollRef = useRef(null)
+  const currentHistoryKeyRef = useRef(historyKey)
 
   useEffect(() => {
+    currentHistoryKeyRef.current = historyKey
+    setError(null)
+    setSending(false)
     let cancelled = false
     loadChatHistory(historyKey).then((saved) => {
       if (cancelled) return
@@ -42,6 +46,7 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
     if (!question || sending) return
     setError(null)
     setInput('')
+    const requestKey = historyKey
     const nextMessages = [...messages, { role: 'user', content: question }]
     setMessages(nextMessages)
 
@@ -57,6 +62,7 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lessonContext, question, history: messages.slice(-10) }),
       })
+      if (currentHistoryKeyRef.current !== requestKey) return
       if (res.status === 429) {
         setError('Too many questions — please wait a moment and try again.')
         return
@@ -66,11 +72,14 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
         return
       }
       const data = await res.json()
+      if (currentHistoryKeyRef.current !== requestKey) return
       setMessages([...nextMessages, { role: 'assistant', content: data.answer }])
     } catch {
-      setError("Couldn't reach the tutor service — check your connection and try again.")
+      if (currentHistoryKeyRef.current === requestKey) {
+        setError("Couldn't reach the tutor service — check your connection and try again.")
+      }
     } finally {
-      setSending(false)
+      if (currentHistoryKeyRef.current === requestKey) setSending(false)
     }
   }
 
