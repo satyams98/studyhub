@@ -253,7 +253,7 @@ print("variance explained by first 2 components:", pca.explained_variance_ratio_
     duration: '25 min',
     kind: 'assignment',
     summary: [
-      'This lab is the Section 4 capstone: a complete, defensible classical-ML pipeline from raw data to a documented final model, using techniques from every prior lesson in this section plus the data-handling skills from Section 2.',
+      'This lab is the Section 4 capstone and the first of this course\'s five flagship portfolio projects: a complete, defensible classical-ML pipeline from raw data to a documented final model, using techniques from every prior lesson in this section plus the data-handling skills from Section 2.',
       'Follow the full sequence: EDA and cleaning (Section 2 skills), feature engineering (encoding, scaling), an honest train/validation/test split (4.1), a baseline model to beat (a simple logistic regression, or even "always predict majority class" as a floor), then compare multiple models (4.2, 4.3), cross-validate and tune hyperparameters, evaluate with metrics that match the real cost of false positives vs. false negatives for churn prediction specifically, and finish with a short explainability pass (4.3).',
       'For churn prediction specifically, consider the metric question directly: a false negative (missing a customer who will churn) costs a lost customer and lost revenue; a false positive (flagging a customer who wouldn\'t have churned) costs an unnecessary retention offer. Decide, and state in your write-up, which mistake is more expensive for a hypothetical business, and choose your evaluation metric (and classification threshold) accordingly — don\'t default to accuracy without justifying it.',
       'The README/write-up is a required deliverable, not optional polish: explain why you chose your final model, why you chose your metric, where the model fails (which segment of customers does it predict worst?), whether you checked for and found any data leakage, and what you would try next given more time. Being able to answer these questions is the actual skill this lab is testing — the code is the vehicle for it.',
@@ -265,6 +265,7 @@ print("variance explained by first 2 components:", pca.explained_variance_ratio_
       'A baseline model (even a trivial one) establishes the floor any "real" model needs to beat to be worth using.',
       'The written explanation — why this model, why this metric, where it fails — is a required deliverable, not an afterthought.',
       'Check explicitly for data leakage (e.g. a feature that\'s only available after the churn event already happened) before trusting a suspiciously high score.',
+      'This is portfolio project #1 of this course\'s five flagship projects.',
     ],
     code: `import pandas as pd
 from sklearn.model_selection import train_test_split, cross_val_score
