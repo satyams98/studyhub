@@ -1,21 +1,24 @@
 import { useState, useRef } from 'react'
-import { Play, RotateCcw, Copy, Check } from 'lucide-react'
-import { runPythonSnippet } from '../lib/pyodideRuntime'
+import { Play, RotateCcw, Copy, Check, Loader2 } from 'lucide-react'
+import { runPythonSnippet, isPyodideReady } from '../lib/pyodideRuntime'
 
 export default function Sandbox({ code: initialCode, label }) {
   const [code, setCode] = useState(initialCode)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [loadingRuntime, setLoadingRuntime] = useState(false)
   const originalCode = useRef(initialCode)
 
   const handleRun = async () => {
+    setLoadingRuntime(!isPyodideReady())
     setRunning(true)
     try {
       const r = await runPythonSnippet(code)
       setResult(r)
     } finally {
       setRunning(false)
+      setLoadingRuntime(false)
     }
   }
 
@@ -47,7 +50,8 @@ export default function Sandbox({ code: initialCode, label }) {
             <RotateCcw size={12} /> Reset
           </button>
           <button type="button" className="sandbox-run-btn" onClick={handleRun} disabled={running}>
-            <Play size={12} /> {running ? 'Running…' : 'Run'}
+            {running ? <Loader2 size={12} className="sandbox-spin" /> : <Play size={12} />}
+            {running ? (loadingRuntime ? 'Loading Python runtime…' : 'Running…') : 'Run'}
           </button>
         </div>
       </div>

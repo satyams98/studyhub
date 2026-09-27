@@ -7,6 +7,11 @@ const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/py
 
 let pyodideLoadingPromise = null
 let packagesReadyPromise = null
+let isReady = false
+
+export function isPyodideReady() {
+  return isReady
+}
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -96,6 +101,7 @@ export async function runPythonSnippet(code) {
   try {
     const pyodide = await getPyodide()
     await ensurePackages(pyodide)
+    isReady = true
 
     pyodide.setStdout({ batched: (s) => { stdout += s + '\n' } })
     pyodide.setStderr({ batched: (s) => { stderr += s + '\n' } })
