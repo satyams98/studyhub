@@ -56,11 +56,14 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
     }
 
     setSending(true)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
     try {
       const res = await fetch(`${PROXY_URL}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lessonContext, question, history: messages.slice(-10) }),
+        signal: controller.signal,
       })
       if (requestGenRef.current !== myGen) return
       if (res.status === 429) {
@@ -79,6 +82,7 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
         setError("Couldn't reach the tutor service — check your connection and try again.")
       }
     } finally {
+      clearTimeout(timeoutId)
       if (requestGenRef.current === myGen) setSending(false)
     }
   }

@@ -29,6 +29,12 @@ const app = express()
 app.use(express.json({ limit: '32kb' }))
 app.use(cors({ origin: ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : false }))
 
+// Trust one hop of reverse proxy (e.g. a typical single load balancer/CDN in
+// front of this service) so express-rate-limit keys by the real client IP
+// instead of the proxy's own address. Increase the hop count if deployed
+// behind more than one proxy layer.
+app.set('trust proxy', 1)
+
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   limit: RATE_LIMIT_PER_MINUTE,
@@ -61,20 +67,28 @@ app.post('/api/ask', async (req, res) => {
   ]
 
   try {
-    const upstream = await fetch(CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        temperature: 0.3,
-        max_tokens: 800,
-        stream: false,
-      }),
-    })
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 25000)
+    let upstream
+    try {
+      upstream = await fetch(CHAT_COMPLETIONS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages,
+          temperature: 0.3,
+          max_tokens: 800,
+          stream: false,
+        }),
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timeoutId)
+    }
 
     if (!upstream.ok) {
       const text = await upstream.text().catch(() => '')
@@ -89,6 +103,10 @@ app.post('/api/ask', async (req, res) => {
     }
     return res.json({ answer })
   } catch (err) {
+    if (err.name === 'AbortError') {
+      console.error('Upstream request timed out')
+      return res.status(504).json({ error: 'The model API took too long to respond.' })
+    }
     console.error('Proxy request failed', err)
     return res.status(502).json({ error: 'Failed to reach the model API.' })
   }
