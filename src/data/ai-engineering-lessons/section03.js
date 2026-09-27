@@ -245,5 +245,6 @@ print("cosine (different direction):",
       ],
       explanation: 'Euclidean distance is sensitive to magnitude, so a large difference in vector length produces a large distance even when the vectors point in nearly the same direction — this would be a misleading signal for embedding comparison, which is precisely why cosine similarity is preferred for that use case.',
     },
+    crossRefs: ['3.1'],
   },
 ]

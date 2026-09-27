@@ -120,6 +120,7 @@ logs.loc[logs["response_time_ms"] > 1000, "flag"] = "slow"
       ],
       explanation: 'Filtering with .loc[] for the successful rows, then grouping by query and averaging response_time_ms, is exactly the split-apply-combine pattern Pandas is built for. Looping manually works but defeats the purpose of using Pandas; grouping by response_time_ms instead of query gets the axes backwards.',
     },
+    crossRefs: ['2.1'],
   },
   {
     id: '2.3',
@@ -253,5 +254,6 @@ plt.savefig("churn_by_month.png")
       ],
       explanation: 'A chart doesn\'t announce that it was built on duplicated rows or string-typed dates sorted alphabetically — it just renders a plausible-looking but wrong result. Inspecting and cleaning first is what catches this before it reaches a conclusion.',
     },
+    crossRefs: ['2.1', '2.2', '2.3'],
   },
 ]

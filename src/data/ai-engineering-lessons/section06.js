@@ -67,7 +67,7 @@ print(vector_a == vector_b)  # True — but these two "bank"s mean different thi
     duration: '15 min',
     kind: 'theory',
     summary: [
-      'Self-attention is the mechanism that computes a contextual embedding (6.1) for each word by letting every word "look at" every other word in the sentence and decide how much attention to pay to each one — this is the core innovation behind every transformer-based model, including every LLM covered in this course.',
+      '<em>Self-attention</em> is the mechanism that computes a contextual embedding (6.1) for each word by letting every word "look at" every other word in the sentence and decide how much attention to pay to each one — this is the core innovation behind every transformer-based model, including every LLM covered in this course.',
       'Each input token is projected into three vectors via learned weight matrices: a <em>Query</em> (what this token is "looking for"), a <em>Key</em> (what this token "offers" to others looking), and a <em>Value</em> (the actual content this token contributes if attended to). This Q/K/V split is not intuitive on first encounter, but it maps onto something familiar: think of it as a lookup system — the Query is your search term, Keys are the index entries being matched against, and Values are the content you retrieve once a match scores high (the same query/candidate/result shape as the similarity search from Section 3.1).',
       'The attention computation itself: take the dot product (Section 3.1) between a token\'s Query and every token\'s Key — this produces a similarity score for how relevant each other token is. Divide by the square root of the key dimension (this is the "scaled" in "scaled dot-product attention" — it keeps the scores in a numerically stable range as dimensions grow), then apply softmax (5.1) to turn those scores into a probability distribution that sums to 1. Finally, use those probabilities to compute a weighted sum of every token\'s Value vector — tokens that scored high attention contribute more to the result.',
       'The formula, <code>Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) @ V</code>, is exactly this sequence of operations you\'ve already seen individually: dot product (3.1), scaling, softmax (5.1), and a weighted sum (matrix multiplication, 3.1). Nothing here is a new mathematical primitive — attention is a specific, motivated composition of primitives from earlier in this course.',
@@ -130,6 +130,7 @@ print("output shape:", output.shape)  # (4, 8) — one contextual vector per tok
       ],
       explanation: 'As the key dimension d_k grows, the dot product\'s magnitude tends to grow with it (more terms summed), which can push softmax into regions where its gradient is very small or its output becomes overly concentrated on one token. Dividing by sqrt(d_k) counteracts this scaling effect, keeping the score distribution well-behaved before softmax is applied.',
     },
+    crossRefs: ['6.1', '3.1', '5.1'],
   },
   {
     id: '6.3',
@@ -199,6 +200,7 @@ print(scores.round(1))
       ],
       explanation: 'During training, the full target sequence is available in memory, so without masking the model could trivially "cheat" by attending to tokens that come after the one it\'s predicting — a shortcut unavailable during actual generation, where future tokens don\'t exist yet. Masking forces training to match the real, one-token-at-a-time generation constraint.',
     },
+    crossRefs: ['6.2'],
   },
   {
     id: '6.4',
@@ -268,6 +270,7 @@ print(scores.round(1))
       ],
       explanation: 'Producing a fixed representation of a document\'s full meaning for search benefits from bidirectional attention (encoder-style), since there\'s no generation involved — while producing open-ended generated text is exactly what decoder-only, autoregressive, causally-masked models are built for. This is why RAG systems typically pair an encoder-style embedding model with a decoder-style LLM.',
     },
+    crossRefs: ['6.2', '6.3'],
   },
   {
     id: '6.5',
@@ -344,6 +347,7 @@ print("top-k=2 (only 'mat' or 'roof' eligible):", vocab[top_k_choice])
       ],
       explanation: 'There is no internal lookup step in a base LLM — every output token, including a date, is sampled from a learned probability distribution shaped by training data and the current context. If that distribution isn\'t sufficiently constrained toward the correct fact, a plausible-sounding but wrong answer can still be highly probable — which is precisely the failure mode RAG is designed to reduce by supplying grounding context.',
     },
+    crossRefs: ['6.4', '6.1', '6.2', '6.3', '5.1'],
   },
   {
     id: '6.6',
@@ -420,5 +424,6 @@ print("attention weights:\\n", weights.round(decimals=3))
       ],
       explanation: 'Masking must set the disallowed positions to negative infinity BEFORE softmax, so that softmax itself produces zero probability there. Applying the mask after softmax would need to renormalize the remaining probabilities to still sum to 1, which naive post-softmax masking usually fails to do correctly — leaving leaked probability mass on supposedly-forbidden positions.',
     },
+    crossRefs: ['6.2', '6.3'],
   },
 ]

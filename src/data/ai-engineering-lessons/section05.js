@@ -66,6 +66,7 @@ print("output probabilities:", output_probs, "-> sums to", output_probs.sum())
       ],
       explanation: 'A weighted sum of a weighted sum (of a weighted sum...) is still just one weighted sum — without a non-linear activation function between layers, any number of stacked linear layers collapses mathematically to a single linear transformation. This is exactly why activation functions are essential, not optional, in a multi-layer network.',
     },
+    crossRefs: ['4.3'],
   },
   {
     id: '5.2',
@@ -152,6 +153,7 @@ b2 -= learning_rate * db2
       ],
       explanation: 'This is the chain rule in its matrix form: since z2 = a1 @ W2 + b2, the gradient of the loss with respect to a1 is the gradient with respect to z2, multiplied by W2 (transposed so the matrix dimensions align). This same pattern — downstream gradient times the local layer\'s weights — is how gradients propagate through any linear layer, regardless of the task.',
     },
+    crossRefs: ['3.2', '5.1'],
   },
   {
     id: '5.3',
@@ -246,6 +248,7 @@ for epoch in range(10):
       ],
       explanation: 'By default, PyTorch accumulates gradients on each backward() call rather than resetting them — zero_grad() is what clears them before each new batch. Omitting it means each batch\'s gradient adds to all previous batches\' gradients, producing increasingly incorrect (usually much too large) parameter updates without raising any error.',
     },
+    crossRefs: ['2.1', '5.2'],
   },
   {
     id: '5.4',
@@ -315,6 +318,7 @@ print(output.shape)  # torch.Size([8, 10]) — 10 class scores per image
       ],
       explanation: 'Parameter sharing means one small kernel\'s weights are applied at every position across the image rather than learning an entirely separate weight for each pixel location — this is what makes CNNs parameter-efficient for image data, not any form of discarding information or being limited to grayscale.',
     },
+    crossRefs: ['5.1'],
   },
   {
     id: '5.5',
@@ -397,5 +401,6 @@ torch.save(model.state_dict(), "mnist_cnn.pt")
       ],
       explanation: 'A single accuracy figure says how often the model is right overall, but nothing about the pattern of its mistakes — the confusion matrix breaks this down per class pair, revealing (for example) that a model confuses "4" and "9" far more than any other digit pair, information that guides where to focus further improvement.',
     },
+    crossRefs: ['5.3', '5.4'],
   },
 ]

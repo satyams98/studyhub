@@ -325,5 +325,6 @@ print("val AUC:", roc_auc_score(y_val, final_model.predict_proba(X_val)[:, 1]))
       ],
       explanation: 'High accuracy alongside low recall is a classic sign of class imbalance — the model likely predicts "no churn" for most customers, which is right often enough to inflate accuracy while missing 80% of actual churners. Whether this is acceptable depends entirely on the real cost of a missed churner versus a false alarm, which the write-up is meant to make explicit rather than defaulting to the accuracy number.',
     },
+    crossRefs: ['4.1', '4.2', '4.3', '4.4', '2.1', '2.2', '2.3', '2.4'],
   },
 ]

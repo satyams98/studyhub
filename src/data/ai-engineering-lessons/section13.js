@@ -83,6 +83,7 @@ async def platform_chat(request: PlatformRequest, user_id: str = Depends(check_r
       ],
       explanation: 'The agent orchestrator adds real overhead — planning, potentially multiple tool calls, more tokens — that\'s unnecessary for a question a single retrieval-and-generate pass can already answer well. Routing by complexity, the same principle behind Section 7.4\'s model-size routing, reserves that overhead for requests that actually need it, keeping the common case fast and cheap.',
     },
+    crossRefs: ['9.8', '8.4', '11.3', '11.4', '10.1', '7.4', '7.3', '11.2', '11.1'],
   },
   {
     id: '13.2',
@@ -165,6 +166,7 @@ CAPSTONE_THRESHOLDS = {
       ],
       explanation: 'Section 13.1\'s routing decision deliberately sends simple requests through a faster path and complex requests through a necessarily slower, more thorough agent path — treating both with the same latency expectation would either falsely flag the agent path as too slow (when that\'s expected given what it does) or fail to catch a genuine regression in the RAG path (if the shared threshold were set loose enough to accommodate the agent path). Separate, appropriately-calibrated thresholds reflect the system\'s actual intended behavior.',
     },
+    crossRefs: ['8.5', '9.6', '13.1', '12.5', '12.4'],
   },
   {
     id: '13.3',
@@ -243,6 +245,7 @@ DESIGN_DEFENSE_PREP = {
       ],
       explanation: 'This lesson\'s core guidance is to prefer a specific, concrete result from your own system\'s actual evaluation over a general statement about RAG systems or an informal impression — citing exact metrics, the test set\'s scope, and that it runs as an automated CI gate demonstrates genuine, verifiable knowledge of the system\'s behavior rather than a vague assurance.',
     },
+    crossRefs: ['13.1', '13.2', '8.1', '7.6', '8.3', '7.4', '8.4', '10.1', '10.4', '7.3', '12.5'],
   },
   {
     id: '13.4',
@@ -318,5 +321,6 @@ async def health_check():
       ],
       explanation: 'Every technical capability in the capstone was already built in an earlier lab — RAG (8.6), the agent (9.8), security hardening (10.4), the API/database (11.6), and the CI/CD pipeline (12.5). The capstone\'s actual work is integration: routing between components, applying security and logging uniformly across both paths, and proving the whole assembled system holds up under the same evaluation and deployment rigor as its individual pieces — exactly the "design, build, evaluate, deploy, and explain an AI system" outcome this course set out to reach back in Lesson 1.1.',
     },
+    crossRefs: ['13.1', '13.2', '13.3', '8.2', '8.4', '8.6', '10.4', '9.8', '11.6', '12.1', '12.4', '12.5'],
   },
 ]

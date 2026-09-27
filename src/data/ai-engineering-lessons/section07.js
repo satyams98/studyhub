@@ -58,6 +58,7 @@ Think through this step by step, then give your final answer as a single number.
       ],
       explanation: 'Chain-of-thought reasoning helps most on tasks requiring genuine multi-step reasoning — a direct sentiment classification is typically a single-step pattern-recognition task the model can already do well zero-shot. Adding unnecessary reasoning tokens increases cost and latency without a corresponding accuracy gain, and is a common over-engineering pitfall in prompt design.',
     },
+    crossRefs: ['1.1', '6.5'],
   },
   {
     id: '7.2',
@@ -132,6 +133,7 @@ print(result)
       ],
       explanation: 'Schema validation checks structure — the right fields exist, with the right types, satisfying any format constraints — but has no way to know that "555-0142" should have actually been "555-0143". Catching semantically wrong-but-well-formed content requires a different mechanism (fact-checking against a source, or evaluation against a known-correct answer), not schema validation.',
     },
+    crossRefs: ['6.5', '7.1'],
   },
   {
     id: '7.3',
@@ -215,6 +217,7 @@ def call_with_reliability(prompt: str, schema_model) -> object:
       ],
       explanation: 'An authentication error is not a transient condition — retrying it will fail identically every time and only wastes time while providing no chance of success. Retrying should be reserved for genuinely transient failures (rate limits, momentary server errors); non-retryable failures should fail fast so the underlying problem (e.g. a bad credential) gets fixed instead of masked by pointless retries.',
     },
+    crossRefs: ['1.3'],
   },
   {
     id: '7.4',
@@ -384,6 +387,7 @@ print(result)
       ],
       explanation: 'A retry only helps with genuinely transient or self-correctable failures — if a specific input pattern reliably causes failures across many resumes, that\'s a systematic gap in the prompt\'s instructions, not randomness a retry will fix. Diagnosing and addressing the actual pattern (per the write-up\'s diagnostic habit) is more effective than raising a retry ceiling that just delays the same failure.',
     },
+    crossRefs: ['7.2', '7.3'],
   },
   {
     id: '7.6',
@@ -440,6 +444,7 @@ print(result)
       ],
       explanation: 'Fine-tuning bakes information into the model\'s weights at training time — updating it for a policy change means re-running the fine-tuning job every time the policy changes, which is slow and expensive. RAG instead retrieves current policy text at query time from a source that can be updated instantly, making it far better suited to frequently-changing factual content — this is exactly the "knowledge gap → RAG, not fine-tuning" guidance from this lesson.',
     },
+    crossRefs: ['1.1'],
   },
   {
     id: '7.7',
@@ -502,6 +507,7 @@ print(f"self-hosted estimate: \${self_hosted_estimate:,.0f}/month (before counti
       ],
       explanation: 'At modest request volume, the fixed operational cost of self-hosting (GPU infrastructure, serving frameworks, ongoing maintenance, and the engineering time all of that requires) is unlikely to be undercut by the savings versus a hosted API\'s per-token pricing — this operational overhead is easy to underweight when comparing only headline dollar-per-token figures.',
     },
+    crossRefs: ['7.4', '7.6'],
   },
   {
     id: '7.8',
@@ -589,5 +595,6 @@ print("fine-tuned model (shorter prompt):", finetuned_response.choices[0].messag
       ],
       explanation: 'Fine-tuning bakes the desired style into the model\'s weights, which is why a shorter prompt achieves the same consistency — but this also means changing that style later requires another fine-tuning job rather than just editing a prompt, which is a real cost against the flexibility a prompt-only approach retains. This is exactly the trade-off the write-up is meant to weigh explicitly.',
     },
+    crossRefs: ['7.6'],
   },
 ]

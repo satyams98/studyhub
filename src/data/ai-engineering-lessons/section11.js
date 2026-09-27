@@ -173,6 +173,7 @@ async def chat(request: ChatRequest):   # async def — doesn't block other requ
       ],
       explanation: 'The whole point of async handlers in a framework like FastAPI is to free up the server to handle other requests while one request is waiting on slow I/O (like an LLM API call) rather than blocking — a synchronous handler holds up that capacity for the full duration of the wait, which is disproportionately costly for AI backends given how much longer LLM calls take than typical database queries.',
     },
+    crossRefs: ['7.2', '7.3', '11.1'],
   },
   {
     id: '11.3',
@@ -245,6 +246,7 @@ CREATE INDEX idx_query_logs_created_at ON query_logs(created_at);
       ],
       explanation: 'If cost or evaluation problems only become visible after they\'ve been happening for a while, having query_logs in place from the start means that history is already captured and available to analyze — designing it after the fact means the exact period you\'d want to investigate has no data trail, which is the same principle Section 9.7 raised about instrumenting tracing before a confusing failure occurs, not after.',
     },
+    crossRefs: ['9.7', '7.4', '8.5', '9.6'],
   },
   {
     id: '11.4',
@@ -323,6 +325,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(check_rate_limit)):
       ],
       explanation: 'The entire purpose of rate limiting on an LLM-backed endpoint is to prevent the cost of a disallowed request from being incurred in the first place — checking the limit after the LLM call has already run means the expensive part of the request happens regardless of whether it should have been allowed, defeating the cost-protection goal of the rate limiter entirely.',
     },
+    crossRefs: ['7.4', '10.2', '11.3', '7.3'],
   },
   {
     id: '11.5',
@@ -405,6 +408,7 @@ async def chat_stream(request: ChatRequest):
       ],
       explanation: 'In a standard (non-streaming) request/response call, the status code is sent along with the complete response, so an error can be signaled cleanly with e.g. a 500 status. In a stream, the status code is sent immediately when streaming begins — by the time a failure occurs partway through, that status code has already been committed as 200, so the only way to signal the failure is through the stream\'s own content, such as an explicit error event.',
     },
+    crossRefs: ['8.5'],
   },
   {
     id: '11.6',
@@ -488,5 +492,6 @@ async def health_check():
       ],
       explanation: 'Section 13.3 explicitly requires defending the capstone\'s full system design under questioning — being able to clearly narrate a request\'s full lifecycle (auth, rate limiting, retrieval, generation, persistence, response) is exactly that skill, and practicing it now on this smaller, simpler system builds the habit before it\'s needed on the much larger capstone system.',
     },
+    crossRefs: ['8.6', '11.1', '11.2', '11.3', '11.4', '11.5', '10.4'],
   },
 ]

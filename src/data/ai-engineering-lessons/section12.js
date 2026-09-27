@@ -52,6 +52,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
       ],
       explanation: 'A floating tag like "latest" points to whatever the current latest version is at build time, which changes over time — building the identical Dockerfile at two different points in time can silently produce two different underlying images, undermining the reproducibility that\'s the entire point of containerization, and mirroring exactly the version-pinning discipline Section 1.2 recommends for Python dependencies themselves.',
     },
+    crossRefs: ['1.2', '11.3'],
   },
   {
     id: '12.2',
@@ -124,6 +125,7 @@ def test_agent_task_success_meets_threshold():
       ],
       explanation: 'Because an LLM\'s output can vary even for the same input (and a "correct" answer can be phrased many different ways), asserting exact output equality the way a conventional unit test would doesn\'t work — the evaluation harnesses from Sections 8.5 and 9.6 instead measure quality metrics (recall, faithfulness, task success) across a representative set, compared against a threshold, which is a different but equally rigorous way of catching regressions.',
     },
+    crossRefs: ['8.5', '9.6'],
   },
   {
     id: '12.3',
@@ -193,6 +195,7 @@ print(f"batched (batch_size=32): processes roughly {batched_throughput:.1f} requ
       ],
       explanation: 'A GPU processing a single request at a time leaves most of its parallel compute capacity idle — grouping multiple requests into a batch lets that capacity be used far more fully, which is why total throughput improves substantially even though an individual request might experience a small added wait for its batch to be ready for processing.',
     },
+    crossRefs: ['7.7', '7.6', '6.2'],
   },
   {
     id: '12.4',
@@ -267,6 +270,7 @@ def check_alerts(daily_metrics: dict):
       ],
       explanation: 'Model or data drift can occur without any deployment on your end — a hosted provider changing what model actually sits behind a "latest" or unpinned alias is a concrete, realistic cause, and it\'s exactly why periodic evaluation-harness checks against a historical baseline matter, not just evaluation triggered by your own code changes.',
     },
+    crossRefs: ['9.7', '3.3', '7.3', '7.4', '11.3', '1.2', '8.5', '9.6'],
   },
   {
     id: '12.5',
@@ -348,5 +352,6 @@ jobs:
       ],
       explanation: 'A pipeline that has only ever run against changes that don\'t degrade quality has never actually exercised its failure path — it\'s entirely possible for a merge gate to be silently misconfigured (e.g. checking the wrong metric, or a threshold set so low it never triggers) and still appear to be "working" simply because nothing has tested whether it would actually catch a real regression. Deliberately introducing one and confirming the pipeline blocks it is the only way to verify the gate functions as intended.',
     },
+    crossRefs: ['11.6', '12.1', '12.2'],
   },
 ]

@@ -96,6 +96,7 @@ print(run_agent_turn("How many billing documents do we have indexed?"))
       ],
       explanation: 'A tool call from the model is a structured request — a name and arguments — never actual code execution. The application receiving that request is responsible for running the real function safely and feeding the result back as context for the model to continue reasoning with. This separation is exactly what keeps tool execution auditable and controllable rather than opaque.',
     },
+    crossRefs: ['7.1', '7.2'],
   },
   {
     id: '9.2',
@@ -176,6 +177,7 @@ while not state.is_complete():
       ],
       explanation: 'Raw conversation history grows unboundedly with every tool call and result appended to it — structured state tracks only what actually matters (the goal, what\'s been done, key results) far more compactly, which is exactly the scaling problem this lesson identifies with the simplest state representation and the reason to move to something more structured once a task grows long enough.',
     },
+    crossRefs: ['9.1', '7.7', '6.3'],
   },
   {
     id: '9.3',
@@ -262,6 +264,7 @@ def call_tool_with_recovery(tool_fn, args: dict, agent_llm, max_attempts: int = 
       ],
       explanation: 'A thrown exception is caught naturally by standard error handling, but a tool call that succeeds mechanically while returning nothing useful (an empty search result) won\'t trigger any exception at all — without an explicit check for this case, the agent could proceed as though it had found relevant information when it actually found nothing, producing a confidently wrong or unsupported downstream answer.',
     },
+    crossRefs: ['9.1', '7.1', '7.3'],
   },
   {
     id: '9.4',
@@ -345,6 +348,7 @@ def manager_agent(user_request: str, worker_agents: dict, planning_llm):
       ],
       explanation: 'Defaulting an unclassified tool to HIGH risk means the safer failure mode occurs when someone forgets to classify a new tool — an unnecessary approval prompt, rather than an unreviewed high-stakes action executing autonomously. This "default to the safer path when uncertain" pattern is a deliberate design choice for exactly this kind of oversight scenario.',
     },
+    crossRefs: ['9.2'],
   },
   {
     id: '9.5',
@@ -440,6 +444,7 @@ result = compiled_graph.invoke({"question": "...", "revision_count": 0})
       ],
       explanation: 'Without a bound, a critique that never quite says "OK" (perhaps due to an overly strict or inconsistent critique prompt) could keep the revise→critique loop running forever, burning tokens without converging — this is exactly the unbounded-reflection-loop risk flagged in Section 9.3, and the revision_count check is what caps it, falling through to finalize regardless once the limit is reached.',
     },
+    crossRefs: ['9.1', '9.2', '9.3', '9.4'],
   },
   {
     id: '9.6',
@@ -534,6 +539,7 @@ if report["failures"]:
       ],
       explanation: 'These two metrics measure genuinely different things: task success only checks the final answer, while tool-call correctness checks the actual path taken to get there. A gap between them — perfect answers via imperfect paths — is exactly the "right answer, wrong path" fragile-success pattern this lesson describes, and it\'s a signal worth investigating before it fails on a similar but not identical future request where the same shortcut doesn\'t happen to work.',
     },
+    crossRefs: ['8.5', '4.2'],
   },
   {
     id: '9.7',
@@ -609,6 +615,7 @@ def run_agent(user_request: str):
       ],
       explanation: 'A regression suite only catches failures matching its existing test cases — a genuinely new failure pattern from a real user\'s specific phrasing won\'t be caught by it, which is exactly why observability/tracing exists as a complementary tool: examining the actual recorded trace of that specific run reveals where the agent\'s reasoning diverged, which then informs both a fix and a new regression-suite case built from this real failure.',
     },
+    crossRefs: ['9.6'],
   },
   {
     id: '9.8',
@@ -705,5 +712,6 @@ research_agent = graph.compile()
       ],
       explanation: 'Per Section 9.4\'s risk-based approach, read-only, easily-reversible actions reasonably warrant full autonomy — but the lab specifically asks for this to be a stated, deliberate assessment in the write-up, since the value of the risk-classification habit is in consistently making this judgment explicit, not in memorizing that "read-only tools never need approval" as a rule to apply unreflectively.',
     },
+    crossRefs: ['9.1', '9.2', '9.3', '9.4', '9.5', '9.6', '9.7', '8.6'],
   },
 ]

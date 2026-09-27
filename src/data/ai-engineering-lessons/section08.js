@@ -6,7 +6,7 @@ export default [
     kind: 'theory',
     summary: [
       'Section 6.5 ended on hallucination: an LLM samples fluent, plausible text from a learned distribution, with no guarantee that distribution is anchored to specific facts it wasn\'t trained on or has since forgotten the details of. <em>Retrieval-Augmented Generation (RAG)</em> addresses this directly — instead of hoping the model already knows an answer, you retrieve relevant source material at query time and hand it to the model as part of its input, so it generates an answer <em>grounded</em> in that material rather than purely from its training data.',
-      'The full pipeline has two phases. <em>Ingestion</em> (done once, ahead of time, and re-run when documents change): documents are split into <em>chunks</em> (8.2), each chunk is converted into an embedding vector (using an encoder-style model, per Section 6.4) via the dot-product-based similarity math from Section 3.1, and stored in a vector database (8.3) alongside the original chunk text. <em>Query time</em> (done for every user request): the user\'s question is embedded the same way, the vector database returns the most similar stored chunks (a similarity search, exactly as covered in 3.1 and 6.1), those chunks are inserted into a prompt alongside the question, and the LLM generates an answer conditioned on that retrieved context.',
+      'The full pipeline has two phases. <em>Ingestion</em> (done once, ahead of time, and re-run when documents change): documents are split into <em>chunks</em> (8.2), each chunk is converted into an embedding vector (using an encoder-style model, per Section 6.4) via the dot-product-based similarity math from Section 3.1, and stored in a <em>vector database</em> (8.3) alongside the original chunk text. <em>Query time</em> (done for every user request): the user\'s question is embedded the same way, the vector database returns the most similar stored chunks (a similarity search, exactly as covered in 3.1 and 6.1), those chunks are inserted into a prompt alongside the question, and the LLM generates an answer conditioned on that retrieved context.',
       'This architecture reframes the LLM\'s job: instead of "recall this fact from training," it becomes "read this provided context and answer using it" — a task LLMs are generally much more reliable at, since the relevant facts are now explicitly present in the input the model conditions on (per 6.5\'s framing of how sampling works), rather than needing to be reconstructed from patterns learned during training.',
       'RAG is not "fine-tuning at query time," and it\'s worth being precise about the distinction from 7.6: fine-tuning changes model weights permanently based on training examples; RAG changes nothing about the model itself and instead changes what\'s in the prompt for a specific request. This is exactly why RAG handles frequently-updating information so much more gracefully than fine-tuning (7.6\'s refund-policy example) — updating a RAG system\'s knowledge means updating documents in a database, not retraining anything.',
       '<strong>Common pitfall:</strong> treating RAG as a solved problem once the basic pipeline works end-to-end. Every stage — chunking (8.2), the vector index itself (8.3), retrieval quality (8.4), and whether the final answer is actually grounded in what was retrieved (8.5) — can silently degrade output quality in its own distinct way, which is why the rest of this section treats each stage as its own topic rather than one monolithic "RAG" lesson.',
@@ -75,6 +75,7 @@ Question: {question}"""
       ],
       explanation: 'Because RAG grounds answers in retrieved documents rather than the model\'s trained-in knowledge, updating what the system "knows" is a matter of updating the document store (re-ingesting the changed policy) — the model itself never needs to be retrained, which is exactly the advantage RAG has over fine-tuning for frequently-changing information.',
     },
+    crossRefs: ['6.5'],
   },
   {
     id: '8.2',
@@ -82,7 +83,7 @@ Question: {question}"""
     duration: '10 min',
     kind: 'concept',
     summary: [
-      'A whole document is almost always too large to embed and retrieve as one unit — it needs to be split into smaller <em>chunks</em> first. Chunking sits earlier in the pipeline than it might seem to deserve attention, but chunk quality has an outsized effect on everything downstream: a badly-chunked document produces embeddings that represent a confusing mix of unrelated content, which degrades retrieval no matter how good the vector index or the LLM is.',
+      'A whole document is almost always too large to embed and retrieve as one unit — it needs to be split into smaller <em>chunks</em> first. <em>Chunking</em> sits earlier in the pipeline than it might seem to deserve attention, but chunk quality has an outsized effect on everything downstream: a badly-chunked document produces embeddings that represent a confusing mix of unrelated content, which degrades retrieval no matter how good the vector index or the LLM is.',
       '<em>Fixed-size chunking</em> splits text into chunks of a set length (e.g. 500 tokens), optionally with some overlap between consecutive chunks so that content near a chunk boundary isn\'t split away from its context entirely. It\'s simple and predictable, but can slice a chunk boundary directly through the middle of a sentence or a coherent idea, degrading both the chunk\'s embedding quality and its usefulness if retrieved on its own.',
       '<em>Recursive chunking</em> tries to split along natural structural boundaries first (paragraphs, then sentences, then words, only as a last resort) while still respecting an approximate target size — this generally produces more coherent chunks than pure fixed-size splitting, since it avoids cutting through a sentence or paragraph unless the size constraint truly forces it.',
       '<em>Semantic chunking</em> goes further, splitting based on where the meaning of the text actually shifts (e.g. by embedding individual sentences and splitting where consecutive sentences\' embeddings diverge significantly) rather than any fixed structural or length rule — this can produce the most coherent chunks but at higher computational cost during ingestion, since it requires embedding at a finer granularity before finalizing chunk boundaries.',
@@ -226,6 +227,7 @@ def hnsw_style_search(query_vector, hnsw_index, top_k=5, ef_search=50):
       ],
       explanation: 'HNSW and other ANN algorithms are explicitly designed to trade a small amount of accuracy (occasionally missing the single truly-closest vector) for a dramatic speed improvement over brute-force search at large scale — this is the intended, tunable behavior of "approximate" search, not a malfunction, and the trade-off is usually adjustable via the index\'s configuration.',
     },
+    crossRefs: ['3.1', '3.4'],
   },
   {
     id: '8.4',
@@ -298,6 +300,7 @@ final_chunks = rerank(query, candidates, reranker_model, final_top_k=5)
       ],
       explanation: 'Since the correct chunk is already being retrieved (it\'s in the top-25), the problem is specifically in how those candidates are ranked before the final cut — reranking directly addresses this by applying a more precise, more expensive scoring pass to just those candidates. Hybrid search would help if the chunk were missing from retrieval entirely, which isn\'t the case described here.',
     },
+    crossRefs: ['8.1'],
   },
   {
     id: '8.5',
@@ -382,6 +385,7 @@ else:
       ],
       explanation: 'If the correct chunk was successfully retrieved and included in the context, the retrieval stage worked as intended — the failure must be happening in how the LLM used that context, which is a faithfulness/generation problem rather than a retrieval problem. Fixes to chunking, indexing, or hybrid search wouldn\'t address a failure that occurs after retrieval has already succeeded.',
     },
+    crossRefs: ['8.2', '8.3', '8.4'],
   },
   {
     id: '8.6',
@@ -471,5 +475,6 @@ def answer_with_citations(question: str, vector_db, embed_model) -> dict:
       ],
       explanation: 'Even a RAG system with strong retrieval can still generate an answer that subtly misrepresents or extends beyond its source context (a faithfulness failure, per 8.5) — showing exactly which chunk supposedly supports each claim gives the user a concrete way to verify that claim themselves, rather than needing to trust the system\'s output on faith. This is why the lab treats citations as core functionality, not decoration.',
     },
+    crossRefs: ['8.1', '8.2', '8.5'],
   },
 ]

@@ -337,5 +337,6 @@ if __name__ == "__main__":
       ],
       explanation: 'A generator yields one line at a time rather than materializing the whole file in memory — for a single small text file the difference is invisible, but the same pattern is what lets an ingestion pipeline scale to very large inputs later without a structural rewrite. It has no effect on word-frequency accuracy or punctuation handling.',
     },
+    crossRefs: ['1.1', '1.2', '1.3', '1.4'],
   },
 ]
