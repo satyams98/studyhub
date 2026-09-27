@@ -17,7 +17,10 @@ function loadScript(src) {
     const script = document.createElement('script')
     script.src = src
     script.onload = () => resolve()
-    script.onerror = () => reject(new Error(`Failed to load ${src}`))
+    script.onerror = () => {
+      script.remove()
+      reject(new Error(`Failed to load ${src}`))
+    }
     document.head.appendChild(script)
   })
 }
@@ -88,26 +91,28 @@ function describeError(err) {
 }
 
 export async function runPythonSnippet(code) {
-  const pyodide = await getPyodide()
-  await ensurePackages(pyodide)
-
   let stdout = ''
   let stderr = ''
-  pyodide.setStdout({ batched: (s) => { stdout += s + '\n' } })
-  pyodide.setStderr({ batched: (s) => { stderr += s + '\n' } })
-
-  const namespace = pyodide.toPy({})
   try {
-    await pyodide.runPythonAsync(FIGURE_CAPTURE_PRELUDE, { globals: namespace })
-    await pyodide.runPythonAsync(code, { globals: namespace })
-    const figuresResult = await pyodide.runPythonAsync(CAPTURE_FIGURES_SNIPPET, { globals: namespace })
-    const images = figuresResult ? figuresResult.toJs() : []
-    return { stdout: stdout.trim(), stderr: stderr.trim(), images, error: null }
+    const pyodide = await getPyodide()
+    await ensurePackages(pyodide)
+
+    pyodide.setStdout({ batched: (s) => { stdout += s + '\n' } })
+    pyodide.setStderr({ batched: (s) => { stderr += s + '\n' } })
+
+    const namespace = pyodide.toPy({})
+    try {
+      await pyodide.runPythonAsync(FIGURE_CAPTURE_PRELUDE, { globals: namespace })
+      await pyodide.runPythonAsync(code, { globals: namespace })
+      const figuresResult = await pyodide.runPythonAsync(CAPTURE_FIGURES_SNIPPET, { globals: namespace })
+      const images = figuresResult ? figuresResult.toJs() : []
+      return { stdout: stdout.trim(), stderr: stderr.trim(), images, error: null }
+    } finally {
+      pyodide.setStdout({})
+      pyodide.setStderr({})
+      namespace.destroy()
+    }
   } catch (err) {
     return { stdout: stdout.trim(), stderr: stderr.trim(), images: [], error: describeError(err) }
-  } finally {
-    pyodide.setStdout({})
-    pyodide.setStderr({})
-    namespace.destroy()
   }
 }
