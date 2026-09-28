@@ -1,70 +1,7 @@
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 import Sandbox from './Sandbox'
-
-const JAVA_KEYWORDS = new Set([
-  'public', 'private', 'protected', 'static', 'final', 'void', 'class', 'interface',
-  'extends', 'implements', 'new', 'return', 'if', 'else', 'for', 'while', 'do',
-  'try', 'catch', 'finally', 'throw', 'throws', 'import', 'package', 'this', 'super',
-  'null', 'true', 'false', 'int', 'long', 'double', 'float', 'boolean', 'char', 'byte',
-  'var', 'enum', 'switch', 'case', 'break', 'continue', 'default', 'abstract', 'synchronized',
-  'volatile', 'transient', 'record',
-])
-
-const TYPE_HINT = /^[A-Z][A-Za-z0-9_<>\[\],. ]*$/
-
-// Small regex-based tokenizer — good enough for readable Java/Reactor snippets
-// without pulling in a full highlighter dependency.
-function highlight(line) {
-  const tokens = []
-  let i = 0
-  const push = (text, cls) => tokens.push({ text, cls })
-
-  while (i < line.length) {
-    const rest = line.slice(i)
-
-    // line comment
-    if (rest.startsWith('//')) {
-      push(rest, 'tok-com')
-      break
-    }
-    // string literal
-    const strMatch = rest.match(/^"(?:[^"\\]|\\.)*"/)
-    if (strMatch) {
-      push(strMatch[0], 'tok-str')
-      i += strMatch[0].length
-      continue
-    }
-    // annotation
-    const annMatch = rest.match(/^@[A-Za-z_][A-Za-z0-9_]*/)
-    if (annMatch) {
-      push(annMatch[0], 'tok-ann')
-      i += annMatch[0].length
-      continue
-    }
-    // number
-    const numMatch = rest.match(/^\b\d+(\.\d+)?[LFDlfd]?\b/)
-    if (numMatch) {
-      push(numMatch[0], 'tok-num')
-      i += numMatch[0].length
-      continue
-    }
-    // identifier / keyword / type
-    const idMatch = rest.match(/^[A-Za-z_][A-Za-z0-9_]*/)
-    if (idMatch) {
-      const word = idMatch[0]
-      if (JAVA_KEYWORDS.has(word)) push(word, 'tok-kw')
-      else if (/^[A-Z]/.test(word)) push(word, 'tok-type')
-      else push(word, null)
-      i += word.length
-      continue
-    }
-    // whitespace / punctuation — advance one char
-    push(rest[0], null)
-    i += 1
-  }
-  return tokens
-}
+import { highlightSource } from '../lib/codeHighlight'
 
 export default function CodeBlock({ code, label = 'Example.java' }) {
   const [copied, setCopied] = useState(false)
@@ -72,7 +9,9 @@ export default function CodeBlock({ code, label = 'Example.java' }) {
   if (label === 'python') {
     return <Sandbox key={code} code={code} label={label} />
   }
-  const lines = code.replace(/\n+$/, '').split('\n')
+  const trimmed = code.replace(/\n+$/, '')
+  const lines = trimmed.split('\n')
+  const highlightedLines = highlightSource(trimmed, label, { fallback: 'java' })
 
   const handleCopy = async () => {
     try {
@@ -94,9 +33,9 @@ export default function CodeBlock({ code, label = 'Example.java' }) {
         </button>
       </div>
       <pre className="code-body"><code>
-        {lines.map((line, li) => (
+        {highlightedLines.map((tokens, li) => (
           <div key={li}>
-            {line.length === 0 ? '\u00A0' : highlight(line).map((tok, ti) =>
+            {lines[li].length === 0 ? '\u00A0' : tokens.map((tok, ti) =>
               tok.cls ? <span key={ti} className={tok.cls}>{tok.text}</span> : <span key={ti}>{tok.text}</span>
             )}
           </div>
