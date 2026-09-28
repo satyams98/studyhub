@@ -1173,3 +1173,16 @@
   outline: none;
 }
 .chat-input:focus { border-color: var(--accent); }
+.chat-send-btn {
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: #1D0F09;
+  cursor: pointer;
+  transition: filter .15s, opacity .15s;
+}
+.chat-send-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.chat-send-btn:disabled { opacity: 0.45; cursor: default; }

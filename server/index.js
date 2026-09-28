@@ -66,43 +66,36 @@ app.post('/api/ask', async (req, res) => {
     { role: 'user', content: question },
   ]
 
+  // Idle timeout: aborts if the upstream goes silent for this long, whether
+  // that's before the initial response or a stall partway through the
+  // stream. Reset on every chunk received once streaming starts.
+  const IDLE_TIMEOUT_MS = 25000
+  const controller = new AbortController()
+  let idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
+  const resetIdleTimer = () => {
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
+  }
+
+  let upstream
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 25000)
-    let upstream
-    try {
-      upstream = await fetch(CHAT_COMPLETIONS_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          messages,
-          temperature: 0.3,
-          max_tokens: 800,
-          stream: false,
-        }),
-        signal: controller.signal,
-      })
-    } finally {
-      clearTimeout(timeoutId)
-    }
-
-    if (!upstream.ok) {
-      const text = await upstream.text().catch(() => '')
-      console.error('Upstream error', upstream.status, text)
-      return res.status(502).json({ error: 'The model API returned an error.' })
-    }
-
-    const data = await upstream.json()
-    const answer = data?.choices?.[0]?.message?.content
-    if (!answer) {
-      return res.status(502).json({ error: 'The model API returned an empty response.' })
-    }
-    return res.json({ answer })
+    upstream = await fetch(CHAT_COMPLETIONS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        temperature: 0.3,
+        max_tokens: 800,
+        stream: true,
+      }),
+      signal: controller.signal,
+    })
   } catch (err) {
+    clearTimeout(idleTimer)
     if (err.name === 'AbortError') {
       console.error('Upstream request timed out')
       return res.status(504).json({ error: 'The model API took too long to respond.' })
@@ -110,6 +103,76 @@ app.post('/api/ask', async (req, res) => {
     console.error('Proxy request failed', err)
     return res.status(502).json({ error: 'Failed to reach the model API.' })
   }
+
+  if (!upstream.ok) {
+    clearTimeout(idleTimer)
+    const text = await upstream.text().catch(() => '')
+    console.error('Upstream error', upstream.status, text)
+    return res.status(502).json({ error: 'The model API returned an error.' })
+  }
+
+  // From here on the response is a text/event-stream of {delta} chunks (our
+  // own minimal protocol, not the upstream's raw SSE shape) terminated by a
+  // literal "[DONE]" event — the client never sees the upstream's own format.
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  let clientClosed = false
+  const reader = upstream.body.getReader()
+  req.on('close', () => {
+    clientClosed = true
+    clearTimeout(idleTimer)
+    reader.cancel().catch(() => {})
+  })
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let gotContent = false
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (clientClosed) break
+      if (done) break
+      resetIdleTimer()
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop()
+      for (const part of parts) {
+        const line = part.trim()
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).trim()
+        if (!payload || payload === '[DONE]') continue
+        let parsed
+        try {
+          parsed = JSON.parse(payload)
+        } catch {
+          continue
+        }
+        const delta = parsed?.choices?.[0]?.delta?.content
+        if (delta) {
+          gotContent = true
+          res.write(`data: ${JSON.stringify({ delta })}\n\n`)
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Stream interrupted', err?.message || err)
+    if (!clientClosed && !gotContent) {
+      res.write(`data: ${JSON.stringify({ error: 'The model API took too long to respond.' })}\n\n`)
+    }
+  } finally {
+    clearTimeout(idleTimer)
+  }
+
+  if (clientClosed) return
+  if (!gotContent) {
+    res.write(`data: ${JSON.stringify({ error: 'The model API returned an empty response.' })}\n\n`)
+  }
+  res.write('data: [DONE]\n\n')
+  res.end()
 })
 
 app.listen(PORT, () => {

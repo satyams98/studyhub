@@ -56,8 +56,17 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
     }
 
     setSending(true)
+    // Idle timeout: aborts if the connection goes silent for this long,
+    // reset on every chunk received so a long-but-actively-streaming answer
+    // is never cut off early.
+    const IDLE_TIMEOUT_MS = 30000
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000)
+    let idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
+    }
+
     try {
       const res = await fetch(`${PROXY_URL}/api/ask`, {
         method: 'POST',
@@ -74,15 +83,58 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
         setError('The tutor is unavailable right now — please try again later.')
         return
       }
-      const data = await res.json()
+
+      setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let accumulated = ''
+      let streamError = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (requestGenRef.current !== myGen) {
+          reader.cancel().catch(() => {})
+          return
+        }
+        if (done) break
+        resetIdleTimer()
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop()
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+          let parsed
+          try {
+            parsed = JSON.parse(payload)
+          } catch {
+            continue
+          }
+          if (parsed.delta) {
+            accumulated += parsed.delta
+            const text = accumulated
+            setMessages((prev) => prev.map((m, i) => (i === prev.length - 1 ? { role: 'assistant', content: text } : m)))
+          } else if (parsed.error) {
+            streamError = parsed.error
+          }
+        }
+      }
+
       if (requestGenRef.current !== myGen) return
-      setMessages([...nextMessages, { role: 'assistant', content: data.answer }])
+      if (streamError) {
+        setError(streamError)
+        if (!accumulated) setMessages((prev) => prev.slice(0, -1))
+      }
     } catch {
       if (requestGenRef.current === myGen) {
         setError("Couldn't reach the tutor service — check your connection and try again.")
       }
     } finally {
-      clearTimeout(timeoutId)
+      clearTimeout(idleTimer)
       if (requestGenRef.current === myGen) setSending(false)
     }
   }
@@ -108,9 +160,11 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
             <div className="chat-empty">Ask a question about this lesson — answers are scoped to its content.</div>
           )}
           {messages.map((m, i) => (
-            <div key={i} className={`chat-bubble chat-${m.role}`}>{m.content}</div>
+            m.content ? <div key={i} className={`chat-bubble chat-${m.role}`}>{m.content}</div> : null
           ))}
-          {sending && <div className="chat-bubble chat-assistant chat-pending">Thinking…</div>}
+          {sending && !messages[messages.length - 1]?.content && (
+            <div className="chat-bubble chat-assistant chat-pending">Thinking…</div>
+          )}
           {error && <div className="chat-error">{error}</div>}
         </div>
         <div className="chat-input-row">
@@ -122,8 +176,14 @@ export default function LessonChat({ open, onClose, lesson, courseSlug }) {
             onKeyDown={handleKeyDown}
             rows={1}
           />
-          <button type="button" className="sandbox-run-btn" onClick={handleSend} disabled={sending || !input.trim()}>
-            <Send size={13} />
+          <button
+            type="button"
+            className="chat-send-btn"
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
+            aria-label="Send"
+          >
+            <Send size={15} />
           </button>
         </div>
       </div>
