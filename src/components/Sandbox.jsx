@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react'
+import { useMemo, useState, useRef } from 'react'
 import { Play, RotateCcw, Copy, Check, Loader2 } from 'lucide-react'
 import { runPythonSnippet, isPyodideReady } from '../lib/pyodideRuntime'
+import { tokenizePython } from '../lib/codeHighlight'
 
 export default function Sandbox({ code: initialCode, label }) {
   const [code, setCode] = useState(initialCode)
@@ -9,6 +10,8 @@ export default function Sandbox({ code: initialCode, label }) {
   const [copied, setCopied] = useState(false)
   const [loadingRuntime, setLoadingRuntime] = useState(false)
   const originalCode = useRef(initialCode)
+
+  const highlightedLines = useMemo(() => tokenizePython(code), [code])
 
   const handleRun = async () => {
     setLoadingRuntime(!isPyodideReady())
@@ -55,15 +58,28 @@ export default function Sandbox({ code: initialCode, label }) {
           </button>
         </div>
       </div>
-      <textarea
-        className="sandbox-editor"
-        value={code}
-        spellCheck={false}
-        onChange={(e) => setCode(e.target.value)}
-        rows={Math.max(4, code.split('\n').length)}
-      />
+      <div className="sandbox-editor-wrap">
+        <pre className="sandbox-highlight" aria-hidden="true">
+          <code>
+            {highlightedLines.map((tokens, li) => (
+              <div key={li}>
+                {tokens.length === 0 ? ' ' : tokens.map((tok, ti) =>
+                  tok.cls ? <span key={ti} className={tok.cls}>{tok.text}</span> : <span key={ti}>{tok.text}</span>
+                )}
+              </div>
+            ))}
+          </code>
+        </pre>
+        <textarea
+          className="sandbox-editor"
+          value={code}
+          spellCheck={false}
+          onChange={(e) => setCode(e.target.value)}
+        />
+      </div>
       {result && (
         <div className="sandbox-output">
+          <div className="sandbox-output-label">Output</div>
           {result.stdout && <pre className="sandbox-stdout">{result.stdout}</pre>}
           {result.images.map((b64, i) => (
             <img key={i} className="sandbox-image" src={`data:image/png;base64,${b64}`} alt={`Plot ${i + 1}`} />
